@@ -1,0 +1,4 @@
+# Testing dependencies (run locally — no Databricks required)
+pytest>=7.4.0
+pyspark>=3.5.0
+pytest-timeout>=2.1.0

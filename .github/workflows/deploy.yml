@@ -1,0 +1,181 @@
+# GitHub Actions — CI/CD cho SkyStream Analytics
+# Trigger: push vào main → deploy production
+#          push vào develop → deploy dev
+#          Pull Request → validate (bundle validate only)
+#
+# Secrets cần cấu hình trong GitHub repo Settings > Secrets:
+#   DATABRICKS_HOST            — URL workspace (VD: https://xxx.cloud.databricks.com)
+#   DATABRICKS_TOKEN           — Personal Access Token (PAT) của Databricks
+#   AWS_ACCESS_KEY_ID          — IAM user key (dùng để deploy Terraform)
+#   AWS_SECRET_ACCESS_KEY      — IAM user secret
+#   TF_VAR_opensky_username    — OpenSky username (optional)
+#   TF_VAR_opensky_password    — OpenSky password (optional)
+#   TF_VAR_databricks_external_id — Databricks External ID cho IAM role
+
+name: SkyStream CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  # ── Job 1: Validate bundle (mọi PR và push) ────────────────────────────────
+  validate:
+    name: Validate Bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks --version
+
+      - name: Validate bundle (dev)
+        run: databricks bundle validate --target dev
+
+  # ── Job 2: Test (mọi PR và push) ──────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 11 (required for PySpark)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create venv and install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r tests/requirements-test.txt
+
+      - name: Run unit tests
+        run: |
+          cd tests
+          ../.venv/bin/pytest -v --tb=short --timeout=120
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: tests/.pytest_cache/
+
+  # ── Job 3: Deploy Infrastructure (chỉ khi push vào main/develop) ───────────
+  deploy_infra:
+    name: Deploy AWS Infrastructure (Terraform)
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_opensky_username: ${{ secrets.TF_VAR_opensky_username }}
+      TF_VAR_opensky_password: ${{ secrets.TF_VAR_opensky_password }}
+      TF_VAR_databricks_external_id: ${{ secrets.TF_VAR_databricks_external_id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Set Terraform variables based on branch
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "TF_VAR_s3_bucket_name=skystream-datalake-prod" >> $GITHUB_ENV
+            echo "TF_WORKSPACE=prod" >> $GITHUB_ENV
+          else
+            echo "TF_VAR_s3_bucket_name=skystream-datalake-dev" >> $GITHUB_ENV
+            echo "TF_WORKSPACE=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Terraform Init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra
+        run: terraform plan -no-color -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve tfplan
+
+  # ── Job 4: Deploy Databricks Bundle ───────────────────────────────────────
+  deploy_bundle:
+    name: Deploy Databricks Bundle
+    runs-on: ubuntu-latest
+    needs: deploy_infra
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+      - name: Set deploy target
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "DEPLOY_TARGET=prod" >> $GITHUB_ENV
+          else
+            echo "DEPLOY_TARGET=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy bundle
+        run: |
+          databricks bundle deploy --target $DEPLOY_TARGET
+          echo "✅ Bundle deployed to: $DEPLOY_TARGET"
+
+      - name: Run airports reference loader (first deploy only — idempotent)
+        run: |
+          databricks bundle run airports_loader_job --target $DEPLOY_TARGET || true
+
+      - name: Start / Restart DLT pipeline
+        run: |
+          databricks bundle run skystream_dlt_pipeline --target $DEPLOY_TARGET
+          echo "✅ DLT Pipeline started in CONTINUOUS mode"
+
+      - name: Notify deployment complete
+        run: |
+          echo "🚀 SkyStream Analytics deployed successfully to: $DEPLOY_TARGET"
+          echo "   Branch  : ${{ github.ref_name }}"
+          echo "   Commit  : ${{ github.sha }}"
+          echo "   Target  : $DEPLOY_TARGET"

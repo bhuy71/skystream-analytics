@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Pytest
+.pytest_cache/
+tests/.pytest_cache/
+
+# Terraform — KHÔNG commit state và secrets
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/terraform.tfvars        # chứa credentials → KHÔNG commit
+infra/tfplan
+infra/lambda_function.zip
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment variables / secrets
+.env
+*.env
+*credentials*
+
+# Databricks CLI cache
+.databricks/

@@ -1,0 +1,7 @@
+# boto3 and urllib3 are already available in the AWS Lambda Python 3.11 runtime.
+# No additional dependencies are needed for the Lambda function.
+#
+# If you want to test handler.py locally, install:
+#   pip install boto3 urllib3
+boto3>=1.34.0
+urllib3>=2.0.0

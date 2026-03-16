@@ -1,0 +1,143 @@
+{
+  "name": "SkyStream Analytics Dashboard",
+  "description": "Real-time flight tracking and business intelligence — 11 streaming Gold tables",
+  "tags": ["skystream", "flights", "streaming", "business-intelligence"],
+  "widgets": [
+    {
+      "id": "w1",
+      "title": "✈️  Aircraft in the Air Right Now",
+      "type": "counter",
+      "query": "SELECT COUNT(DISTINCT icao24) AS total_airborne FROM silver.flights WHERE on_ground = false AND snapshot_time_ts >= current_timestamp() - INTERVAL 2 MINUTES",
+      "refresh_seconds": 30
+    },
+    {
+      "id": "w2",
+      "title": "🌍 Top 15 Countries by Active Flights",
+      "type": "bar",
+      "query": "SELECT origin_country, COUNT(DISTINCT icao24) AS active_aircraft FROM silver.flights WHERE on_ground = false AND snapshot_time_ts >= current_timestamp() - INTERVAL 2 MINUTES GROUP BY origin_country ORDER BY active_aircraft DESC LIMIT 15",
+      "refresh_seconds": 60,
+      "x_column": "origin_country",
+      "y_column": "active_aircraft"
+    },
+    {
+      "id": "w3",
+      "title": "🔴 Flight Alerts (Rapid Descent / Abnormal Altitude)",
+      "type": "table",
+      "query": "SELECT alert_generated_at, icao24, callsign, origin_country, alert_type, altitude_m, vertical_rate, latitude, longitude FROM gold.flight_alerts WHERE alert_generated_at >= current_timestamp() - INTERVAL 30 MINUTES ORDER BY alert_generated_at DESC LIMIT 50",
+      "refresh_seconds": 30
+    },
+    {
+      "id": "w4",
+      "title": "📊 Flight Phase Distribution (Last 5 min)",
+      "type": "pie",
+      "query": "SELECT flight_phase, SUM(aircraft_count) AS total FROM gold.flight_phase_stats WHERE window_start >= current_timestamp() - INTERVAL 10 MINUTES GROUP BY flight_phase",
+      "refresh_seconds": 60,
+      "label_column": "flight_phase",
+      "value_column": "total"
+    },
+    {
+      "id": "w5",
+      "title": "📈 Hourly Traffic Trend — Top 5 Countries (Last 24h)",
+      "type": "line",
+      "query": "SELECT window_start, origin_country, unique_aircraft FROM gold.hourly_traffic WHERE window_start >= current_timestamp() - INTERVAL 24 HOURS AND origin_country IN (SELECT origin_country FROM gold.hourly_traffic WHERE window_start >= current_timestamp() - INTERVAL 1 HOUR GROUP BY origin_country ORDER BY SUM(unique_aircraft) DESC LIMIT 5) ORDER BY window_start",
+      "refresh_seconds": 300,
+      "x_column": "window_start",
+      "y_column": "unique_aircraft",
+      "series_column": "origin_country"
+    },
+    {
+      "id": "w6",
+      "title": "🏢 Live Airline Market Share (Top 20)",
+      "type": "bar",
+      "query": "SELECT airline_icao, SUM(active_aircraft) AS active_aircraft, ROUND(AVG(market_share_pct), 2) AS avg_market_share_pct FROM gold.airline_market_share WHERE window_start >= current_timestamp() - INTERVAL 15 MINUTES GROUP BY airline_icao ORDER BY active_aircraft DESC LIMIT 20",
+      "refresh_seconds": 60,
+      "x_column": "airline_icao",
+      "y_column": "active_aircraft"
+    },
+    {
+      "id": "w7",
+      "title": "📦 Cargo Flow by Carrier (Last 30 min)",
+      "type": "bar",
+      "query": "SELECT carrier_name, SUM(distinct_aircraft) AS aircraft, SUM(estimated_tonnage_mt) AS estimated_tons FROM gold.cargo_flow WHERE window_start >= current_timestamp() - INTERVAL 30 MINUTES GROUP BY carrier_name ORDER BY aircraft DESC",
+      "refresh_seconds": 60,
+      "x_column": "carrier_name",
+      "y_column": "aircraft"
+    },
+    {
+      "id": "w8",
+      "title": "🛬 Airport Congestion Scores (Current)",
+      "type": "table",
+      "query": "SELECT airport_name, approaching, departing, total_in_vicinity, congestion_score, congestion_level FROM gold.airport_congestion WHERE window_start >= current_timestamp() - INTERVAL 10 MINUTES ORDER BY congestion_score DESC",
+      "refresh_seconds": 60
+    },
+    {
+      "id": "w9",
+      "title": "🏖️ Tourism Demand Signal — Inbound Flights to Top Destinations",
+      "type": "bar",
+      "query": "SELECT region_name, SUM(inbound_aircraft) AS inbound_flights, MAX(origin_countries) AS source_countries FROM gold.tourism_demand_signal WHERE window_start >= current_timestamp() - INTERVAL 1 HOUR GROUP BY region_name ORDER BY inbound_flights DESC",
+      "refresh_seconds": 120,
+      "x_column": "region_name",
+      "y_column": "inbound_flights"
+    },
+    {
+      "id": "w10",
+      "title": "⛽ Estimated Fuel Burn by Country (Last 1h, kg)",
+      "type": "bar",
+      "query": "SELECT origin_country, SUM(fuel_burn_kg) AS total_fuel_kg, SUM(co2_tonnes) AS total_co2_tonnes FROM gold.fuel_burn_estimate WHERE window_start >= current_timestamp() - INTERVAL 1 HOUR GROUP BY origin_country ORDER BY total_fuel_kg DESC LIMIT 15",
+      "refresh_seconds": 120,
+      "x_column": "origin_country",
+      "y_column": "total_fuel_kg"
+    },
+    {
+      "id": "w11",
+      "title": "📉 Economic Activity Index — Latest by Country",
+      "type": "table",
+      "query": "SELECT origin_country, unique_aircraft, economic_activity_index, activity_signal, window_start FROM gold.economic_activity_index WHERE window_start = (SELECT MAX(window_start) FROM gold.economic_activity_index) ORDER BY economic_activity_index DESC LIMIT 20",
+      "refresh_seconds": 300
+    },
+    {
+      "id": "w12",
+      "title": "🗺️ Route Demand Surge Zones (Last 15 min)",
+      "type": "table",
+      "query": "SELECT lat_zone, lon_zone, flight_count, demand_vs_world_avg_pct, demand_signal FROM gold.route_demand_index WHERE window_start >= current_timestamp() - INTERVAL 30 MINUTES AND demand_signal != 'NORMAL' ORDER BY demand_vs_world_avg_pct DESC LIMIT 30",
+      "refresh_seconds": 120
+    }
+  ],
+  "layout": {
+    "rows": [
+      ["w1", "w4"],
+      ["w2", "w6"],
+      ["w3"],
+      ["w5"],
+      ["w8", "w7"],
+      ["w9", "w10"],
+      ["w11", "w12"]
+    ]
+  },
+  "alerts": [
+    {
+      "id": "alert1",
+      "name": "Rapid Descent Spike",
+      "query": "SELECT COUNT(*) AS cnt FROM gold.flight_alerts WHERE alert_type = 'RAPID_DESCENT' AND alert_generated_at >= current_timestamp() - INTERVAL 5 MINUTES",
+      "condition": "cnt > 5",
+      "channels": ["email"],
+      "message": "⚠️ SkyStream Alert: More than 5 rapid descent events detected in the last 5 minutes. Check gold.flight_alerts for details."
+    },
+    {
+      "id": "alert2",
+      "name": "Airport Critical Congestion",
+      "query": "SELECT COUNT(*) AS cnt FROM gold.airport_congestion WHERE congestion_level = 'CRITICAL' AND window_start >= current_timestamp() - INTERVAL 10 MINUTES",
+      "condition": "cnt > 0",
+      "channels": ["email"],
+      "message": "🔴 SkyStream Alert: One or more airports have reached CRITICAL congestion level."
+    },
+    {
+      "id": "alert3",
+      "name": "Tourism Surge Detected",
+      "query": "SELECT region_name, SUM(inbound_aircraft) AS inbound FROM gold.tourism_demand_signal WHERE window_start >= current_timestamp() - INTERVAL 15 MINUTES GROUP BY region_name HAVING inbound > 20",
+      "condition": "COUNT(*) > 0",
+      "channels": ["email"],
+      "message": "📈 SkyStream: Tourism surge detected at one or more destinations. Check gold.tourism_demand_signal."
+    }
+  ]
+}
