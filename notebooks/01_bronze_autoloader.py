@@ -19,14 +19,14 @@ S3_BUCKET        = "skystream-datalake-dev"           # Change to your bucket na
 S3_BRONZE_PATH   = f"s3://{S3_BUCKET}/bronze/raw_states/"
 SCHEMA_LOCATION  = f"s3://{S3_BUCKET}/_schemas/bronze"
 CHECKPOINT_PATH  = f"s3://{S3_BUCKET}/_checkpoints/bronze_autoloader"
-BRONZE_TABLE     = "bronze.raw_flight_states"
+BRONZE_TABLE     = "workspace_7474644985505263.bronze.raw_flight_states"
 TRIGGER_INTERVAL = "30 seconds"
 
 # COMMAND ----------
 
 # ── Create databases ────────────────────────────────────────────────────────────
 for db in ["bronze", "silver", "gold", "reference"]:
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS {db}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS workspace_7474644985505263.{db}")
     print(f"✓ Database '{db}' ready")
 
 # COMMAND ----------

@@ -20,8 +20,8 @@
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 S3_BUCKET        = "skystream-datalake-dev"   # Change to your bucket name
-BRONZE_TABLE     = "bronze.raw_flight_states"
-SILVER_TABLE     = "silver.flights"
+BRONZE_TABLE     = "workspace_7474644985505263.bronze.raw_flight_states"
+SILVER_TABLE     = "workspace_7474644985505263.silver.flights"
 CHECKPOINT_PATH  = f"s3://{S3_BUCKET}/_checkpoints/silver_transform"
 TRIGGER_INTERVAL = "30 seconds"
 WATERMARK_DELAY  = "2 minutes"

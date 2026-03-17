@@ -24,7 +24,7 @@
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 S3_BUCKET        = "skystream-datalake-dev"   # Change to your bucket name
-SILVER_TABLE     = "silver.flights"
+SILVER_TABLE     = "workspace_7474644985505263.silver.flights"
 CKPT_BASE        = f"s3://{S3_BUCKET}/_checkpoints/gold"
 TRIGGER_INTERVAL = "30 seconds"
 WATERMARK_DELAY  = "2 minutes"
@@ -167,7 +167,7 @@ q1 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/airspace_density")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.airspace_density")
+    .toTable("workspace_7474644985505263.gold.airspace_density")
 )
 print(f"✓ [1/11] gold.airspace_density — query ID: {q1.id}")
 
@@ -204,7 +204,7 @@ q2 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/flight_phase_stats")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.flight_phase_stats")
+    .toTable("workspace_7474644985505263.gold.flight_phase_stats")
 )
 print(f"✓ [2/11] gold.flight_phase_stats — query ID: {q2.id}")
 
@@ -252,7 +252,7 @@ q3 = (
     .outputMode("append")
     .option("checkpointLocation", f"{CKPT_BASE}/flight_alerts")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.flight_alerts")
+    .toTable("workspace_7474644985505263.gold.flight_alerts")
 )
 print(f"✓ [3/11] gold.flight_alerts — query ID: {q3.id}")
 
@@ -290,7 +290,7 @@ q4 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/hourly_traffic")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.hourly_traffic")
+    .toTable("workspace_7474644985505263.gold.hourly_traffic")
 )
 print(f"✓ [4/11] gold.hourly_traffic — query ID: {q4.id}")
 
@@ -343,7 +343,7 @@ def write_route_demand_with_index(batch_df, batch_id):
         .when(F.col("demand_vs_world_avg_pct") <  60, "DIP")
         .otherwise("NORMAL")
     )
-    batch_df.write.format("delta").mode("append").saveAsTable("gold.route_demand_index")
+    batch_df.write.format("delta").mode("append").saveAsTable("workspace_7474644985505263.gold.route_demand_index")
 
 q5 = (
     df_route_demand.writeStream
@@ -411,7 +411,7 @@ q6 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/airline_market_share")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.airline_market_share")
+    .toTable("workspace_7474644985505263.gold.airline_market_share")
 )
 print(f"✓ [6/11] gold.airline_market_share — query ID: {q6.id}")
 
@@ -460,7 +460,7 @@ q7 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/cargo_flow")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.cargo_flow")
+    .toTable("workspace_7474644985505263.gold.cargo_flow")
 )
 print(f"✓ [7/11] gold.cargo_flow — query ID: {q7.id}")
 
@@ -527,7 +527,7 @@ def compute_airport_congestion(batch_df, batch_id):
         .withColumn("window_start", F.current_timestamp())
     )
 
-    congestion.write.format("delta").mode("append").saveAsTable("gold.airport_congestion")
+    congestion.write.format("delta").mode("append").saveAsTable("workspace_7474644985505263.gold.airport_congestion")
 
 q8 = (
     df_silver.writeStream
@@ -584,7 +584,7 @@ def compute_tourism_signal(batch_df, batch_id):
         )
     )
 
-    result.write.format("delta").mode("append").saveAsTable("gold.tourism_demand_signal")
+    result.write.format("delta").mode("append").saveAsTable("workspace_7474644985505263.gold.tourism_demand_signal")
 
 q9 = (
     df_silver.writeStream
@@ -653,7 +653,7 @@ q10 = (
     .outputMode("update")
     .option("checkpointLocation", f"{CKPT_BASE}/fuel_burn_estimate")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .toTable("gold.fuel_burn_estimate")
+    .toTable("workspace_7474644985505263.gold.fuel_burn_estimate")
 )
 print(f"✓ [10/11] gold.fuel_burn_estimate — query ID: {q10.id}")
 
@@ -706,7 +706,7 @@ def write_economic_index(batch_df, batch_id):
         .when(F.col("economic_activity_index") <=  90, "CONTRACTING")
         .otherwise("STABLE")
     )
-    result.write.format("delta").mode("append").saveAsTable("gold.economic_activity_index")
+    result.write.format("delta").mode("append").saveAsTable("workspace_7474644985505263.gold.economic_activity_index")
 
 q11 = (
     df_econ.writeStream
