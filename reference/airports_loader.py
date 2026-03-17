@@ -1,3 +1,10 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Reference: Load Airports Data
+# MAGIC One-time batch job: download OurAirports data and load into `reference.airports` Delta table.
+# MAGIC Run this notebook once before starting the pipeline.
+
+# COMMAND ----------
 """
 reference/airports_loader.py
 
