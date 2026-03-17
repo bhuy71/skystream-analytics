@@ -302,18 +302,21 @@ resource "aws_kinesis_firehose_delivery_stream" "flights_to_s3" {
 resource "aws_iam_role" "databricks_role" {
   name = "${var.project_name}-databricks-role"
 
-  assume_role_policy = jsonencode({
+  assume_role_policy = var.databricks_external_id != "" ? jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Action    = "sts:AssumeRole"
-        Effect    = "Allow"
-        Principal = { AWS = "arn:aws:iam::${var.databricks_aws_account_id}:root" }
-        Condition = var.databricks_external_id != "" ? {
-          StringEquals = { "sts:ExternalId" = var.databricks_external_id }
-        } : {}
-      }
-    ]
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${var.databricks_aws_account_id}:root" }
+      Condition = { StringEquals = { "sts:ExternalId" = var.databricks_external_id } }
+    }]
+  }) : jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${var.databricks_aws_account_id}:root" }
+    }]
   })
 
   tags = var.tags

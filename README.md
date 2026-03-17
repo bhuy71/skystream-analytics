@@ -166,18 +166,19 @@ for s in d['states'][:3]:
 - Nhìn vào thanh địa chỉ trình duyệt: `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com`
 - **Copy và lưu lại** toàn bộ URL này
 
-#### 4b. Lấy External ID (cho IAM Role)
-1. Trong Databricks → click icon **⚙️ Settings** (góc trái dưới) → **Security**
-2. Tìm mục **IAM Role** → click **Add IAM Role**
-3. Sẽ thấy hộp thoại hiện ra với **External ID** — dạng: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
-4. **Copy và lưu lại** External ID này (dùng ở Bước 5)
-5. **Chưa cần điền gì** — để cửa sổ này mở, sau Bước 5 mới quay lại
+#### 4b. Tạo Personal Access Token (PAT)
+1. Databricks workspace → click avatar góc **trên phải** → **Settings**
+2. Chọn **Developer** → **Access tokens** → **Manage** → **Generate new token**
+3. Điền:
+   - **Comment**: `skystream-cli`
+   - **Lifetime (days)**: `90`
+   - **Scope**: chọn **Other APIs**
+   - **API scope(s)**: tick các scope: `clusters`, `jobs`, `pipelines`, `dbfs`, `sql`, `files`
+     *(hoặc tick `all APIs` nếu là workspace cá nhân)*
+4. Click **Generate** → **copy token ngay** — dạng `dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (chỉ hiện 1 lần)
+5. Lưu vào nơi an toàn
 
-#### 4c. Tạo Personal Access Token (PAT)
-1. Databricks → **⚙️ Settings** → **Developer** → **Access tokens**
-2. **Generate new token** → Description: `skystream-cli` → Lifetime: `90` → **Generate**
-3. **Copy token ngay** — dạng `dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (chỉ hiện 1 lần)
-4. Lưu vào nơi an toàn
+> ℹ️ **External ID không bắt buộc** — project này không yêu cầu. Terraform sẽ tạo IAM role mà không cần External ID.
 
 ---
 
@@ -191,11 +192,10 @@ terraform init
 Tạo file biến cá nhân **(file này đã có trong `.gitignore`, KHÔNG bị commit lên git)**:
 ```bash
 cat > terraform.tfvars << 'EOF'
-aws_region             = "us-east-1"
-s3_bucket_name         = "skystream-datalake-dev"
-opensky_username       = "THAY_BANG_OPENSKY_USERNAME_CUA_BAN"
-opensky_password       = "THAY_BANG_OPENSKY_PASSWORD_CUA_BAN"
-databricks_external_id = "THAY_BANG_EXTERNAL_ID_TU_BUOC_4B"
+aws_region       = "us-east-1"
+s3_bucket_name   = "skystream-datalake-dev"
+opensky_username = "THAY_BANG_OPENSKY_USERNAME_CUA_BAN"
+opensky_password = "THAY_BANG_OPENSKY_PASSWORD_CUA_BAN"
 EOF
 ```
 
@@ -226,12 +226,14 @@ cd ..  # quay về thư mục root
 
 ---
 
-### BƯỚC 6 — Gắn IAM Role vào Databricks
+### BƯỚC 6 — Gắn IAM Role vào Databricks (Instance Profile)
 
-1. Quay lại cửa sổ Databricks từ Bước 4b (hộp thoại Add IAM Role)
-2. Trong ô **IAM Role ARN**, dán giá trị `databricks_iam_role_arn` từ Terraform output
+1. Vào Databricks workspace → **⚙️ Settings** (góc trái dưới) → **Security**
+2. Tìm mục **Instance profiles** → click **Add instance profile**
+3. Trong ô **Instance profile ARN**, dán giá trị `databricks_iam_role_arn` từ Terraform output
    - VD: `arn:aws:iam::123456789012:role/skystream-databricks-role`
-3. Nhấn **Add** → IAM Role xuất hiện trong danh sách là thành công ✅
+4. Bỏ tick **Skip validation** (để Databricks tự kiểm tra)
+5. Nhấn **Add** → Instance profile xuất hiện trong danh sách là thành công ✅
 
 ---
 
@@ -243,7 +245,7 @@ databricks configure
 Điền:
 ```
 Databricks host: https://dbc-xxxxxxxx-xxxx.cloud.databricks.com  ← URL từ Bước 4a
-Token:           dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             ← PAT từ Bước 4c
+Token:           dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             ← PAT từ Bước 4b
 ```
 
 Kiểm tra kết nối:
@@ -456,12 +458,11 @@ Thêm lần lượt **7 secrets** sau:
 | Secret Name | Giá trị | Lấy từ đâu |
 |-------------|---------|------------|
 | `DATABRICKS_HOST` | `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com` | Bước 4a |
-| `DATABRICKS_TOKEN` | `dapi_xxxxxxxxxxxxxxxx` | Bước 4c |
+| `DATABRICKS_TOKEN` | `dapi_xxxxxxxxxxxxxxxx` | Bước 4b |
 | `AWS_ACCESS_KEY_ID` | `AKIA...` | Bước 2b |
 | `AWS_SECRET_ACCESS_KEY` | `xxxxxxxx` | Bước 2b |
 | `TF_VAR_opensky_username` | username OpenSky | Bước 3 |
 | `TF_VAR_opensky_password` | password OpenSky | Bước 3 |
-| `TF_VAR_databricks_external_id` | UUID External ID | Bước 4b |
 
 > Cách thêm từng secret: **New repository secret** → điền **Name** → điền **Secret** → **Add secret**
 
