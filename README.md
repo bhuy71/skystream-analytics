@@ -2,30 +2,49 @@
 
 **Real-time Flight Tracking & Business Intelligence Platform**
 
-Streaming data pipeline theo kiến trúc **Medallion (Bronze → Silver → Gold)** xây dựng trên **AWS + Databricks**, sử dụng dữ liệu ADS-B thật từ OpenSky Network. CI/CD hoàn toàn tự động qua **Databricks Asset Bundle (DAB) + GitHub Actions**.
+Streaming data pipeline theo kiến trúc **Medallion + Lambda Architecture** xây dựng trên **AWS + Databricks**, sử dụng dữ liệu ADS-B thật từ OpenSky Network. CI/CD hoàn toàn tự động qua **Databricks Asset Bundle (DAB) + GitHub Actions**.
 
 ---
 
 ## 🏗️ Kiến Trúc
 
+### Lambda Architecture — 3 Layers
+
 ```
 OpenSky Network API (real-time ADS-B, cập nhật mỗi 10 giây)
         │ poll mỗi phút (AWS Lambda)
         ▼
-Amazon Kinesis Data Streams (2 shards)
+Amazon Kinesis Data Streams → Kinesis Firehose → S3 /bronze/raw_states/
+        │
+        ├─── SPEED LAYER (real-time, latency <3 phút) ──────────────────────┐
+        │    Databricks Delta Live Tables — CONTINUOUS mode                  │
+        │      🥉 Bronze: raw_flight_states                                  │
+        │      🥈 Silver: flight_states (cleaned, enriched)                  │
+        │      🥇 Gold:   11 bảng real-time analytics                        │
+        │                                                                    │
+        └─── BATCH LAYER (historical, chạy daily 2AM) ──────────────────────┤
+             notebooks/05_batch_layer.py                                     │
+               📊 7 bảng lịch sử 30 ngày / 52 tuần:                         │
+                  airline_reliability, route_growth_trend,                   │
+                  airport_traffic_ranking, fuel_efficiency_ranking,           │
+                  cargo_trade_lane, tourism_seasonality, economic_index      │
+                                                                             │
+        ┌────────────────────────────────────────────────────────────────────┘
         │
         ▼
-Kinesis Firehose → S3 /bronze/raw_states/ (GZIP, buffer 60s)
-        │
-        ▼
-Databricks Delta Live Tables — CONTINUOUS mode
-  🥉 Bronze: raw_flight_states
-  🥈 Silver: flights (cleaned, enriched, typed)
-  🥇 Gold:   11 bảng analytics (market share, cargo, tourism, congestion...)
+SERVING LAYER (chạy daily 4AM, sau Batch Layer)
+  notebooks/06_serving_layer.py
+    🔗 MERGE batch.* + gold.* → 7 serving views thống nhất:
+       airline_360, airport_ops, route_intelligence,
+       cargo_intelligence, sustainability_report,
+       economic_dashboard, tourism_dashboard
         │
         ▼
 Databricks SQL Dashboard (auto-refresh 30s) + Alerts
+  → 3 loại insight: Real-time (Gold) | Trend (Batch) | Unified (Serving)
 ```
+
+> 📖 Xem chi tiết kiến trúc, usecase và ví dụ I/O tại [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 
 ---
 
@@ -34,6 +53,7 @@ Databricks SQL Dashboard (auto-refresh 30s) + Alerts
 ```
 databrick/
 ├── databricks.yml                  ← Databricks Asset Bundle config (CI/CD entry point)
+├── ARCHITECTURE.md                 ← Mô tả chi tiết Lambda Architecture + usecases
 ├── .github/workflows/deploy.yml    ← GitHub Actions CI/CD pipeline
 ├── infra/
 │   ├── main.tf                     ← Terraform: S3, Kinesis, Lambda, IAM, Firehose
@@ -44,15 +64,18 @@ databrick/
 │   └── requirements.txt
 ├── notebooks/
 │   ├── 01_bronze_autoloader.py     ← Auto Loader → bronze.raw_flight_states
-│   ├── 02_silver_transform.py      ← Cleaning & enrichment → silver.flights
+│   ├── 02_silver_transform.py      ← Cleaning & enrichment → silver.flight_states
 │   ├── 03_gold_analytics.py        ← 11 Gold streaming queries
-│   └── 04_dlt_pipeline.py          ← Delta Live Tables (dùng cho DAB deploy)
+│   ├── 04_dlt_pipeline.py          ← Delta Live Tables (Speed Layer — dùng cho DAB deploy)
+│   ├── 05_batch_layer.py           ← Batch Layer: 7 views lịch sử 30d/52w (daily 2AM)
+│   └── 06_serving_layer.py         ← Serving Layer: MERGE batch + gold → unified views (daily 4AM)
 ├── reference/airports_loader.py    ← One-time: load airports CSV → Delta table
 ├── dashboards/skystream_dashboard.json
 ├── tests/
 │   ├── conftest.py
 │   ├── test_silver_transform.py
 │   ├── test_gold_aggregation.py
+│   ├── test_batch_serving.py       ← Tests cho Batch Layer + Serving Layer
 │   └── requirements-test.txt
 └── plan.md
 ```
@@ -268,7 +291,7 @@ open -e /Users/admin/databrick/databricks.yml
 # code /Users/admin/databrick/databricks.yml
 ```
 
-**Tìm và thay thế 5 chỗ trống** (tìm bằng Cmd+F với chuỗi `""`):
+**Tìm và thay thế các chỗ trống** (tìm bằng Cmd+F với chuỗi `dbc-`):
 
 **Chỗ 1 — Workspace URL (target dev):**
 ```yaml
@@ -278,37 +301,27 @@ targets:
       host: "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"   # ← dán URL Bước 4a
 ```
 
-**Chỗ 2 — Workspace URL (target prod, có thể dùng cùng workspace):**
+**Chỗ 2 — Workspace URL (target prod):**
 ```yaml
   prod:
     workspace:
       host: "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"   # ← cùng URL hoặc workspace khác
 ```
 
-**Chỗ 3 — Instance Profile ARN cho DLT pipeline cluster:**
+**Chỗ 3 — Instance Profile ARN cho DLT cluster ở prod** (tìm `instance_profile_arn` trong block `targets.prod`):
 ```yaml
-      clusters:
-        - label: default
-          aws_attributes:
-            instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"  # ← databricks_instance_profile_arn từ Terraform output
+  prod:
+    resources:
+      pipelines:
+        skystream_dlt_pipeline:
+          clusters:
+            - label: default
+              aws_attributes:
+                instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"
+                # ← databricks_instance_profile_arn từ Terraform output
 ```
 
-**Chỗ 4 — Instance Profile ARN cho airports_loader_job:**
-```yaml
-    airports_loader_job:
-      tasks:
-        - task_key: load_airports
-          new_cluster:
-            aws_attributes:
-              instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"  # ← databricks_instance_profile_arn từ Terraform output
-```
-
-**Chỗ 5 — Email nhận thông báo khi pipeline lỗi:**
-```yaml
-      notifications:
-        - email_recipients:
-            - "your@email.com"   # ← email của bạn
-```
+> ℹ️ Các jobs (airports_loader, batch_layer, serving_layer) dùng **Serverless compute** — không cần instance profile ARN.
 
 Lưu file lại.
 
@@ -329,7 +342,10 @@ Kết quả mong đợi:
 test_silver_transform.py::TestDataQualityFilters::test_null_latitude_dropped PASSED
 test_silver_transform.py::TestFlightPhaseClassification::test_climbing_phase PASSED
 ...
-========================= 29 passed in 6.49s =========================
+test_batch_serving.py::TestBatchAirlineReliability::test_reliability_score_ordering PASSED
+test_batch_serving.py::TestServingLayer::test_investment_signal_strong_buy PASSED
+...
+========================= 42 passed in 8.x s =========================
 ```
 
 ```bash
@@ -350,36 +366,75 @@ databricks bundle deploy --target dev
 
 Kết quả mong đợi:
 ```
-Uploading bundle files to /Shared/skystream-analytics/dev...
+Uploading bundle files to /Workspace/Users/.../.bundle/skystream-analytics/dev/files...
 Deploying resources...
   Updating pipeline skystream_dlt_pipeline...
   Updating job airports_loader_job...
   Updating job skystream_streaming_job...
-Successfully deployed!
+  Updating job batch_layer_job...
+  Updating job serving_layer_job...
+Deployment complete!
 ```
 
 Kiểm tra trên Databricks UI:
 - **Workflows → Delta Live Tables** → thấy `SkyStream Analytics — DLT Pipeline [dev]` ✅
-- **Workflows → Jobs** → thấy `SkyStream — Load Airports Reference [dev]` ✅
+- **Workflows → Jobs** → thấy 4 jobs: `airports_loader`, `streaming`, `batch_layer`, `serving_layer` ✅
+
+### Compute cho từng job
+
+| Job | Dev | Prod |
+|-----|-----|------|
+| `airports_loader_job` | Serverless | Serverless |
+| `batch_layer_job` | Serverless | Serverless |
+| `serving_layer_job` | Serverless | Serverless |
+| `skystream_dlt_pipeline` | Serverless DLT | Classic `i3.xlarge` × 2 |
+| `skystream_streaming_job` | Serverless | ❌ Không chạy ở prod |
+
+> ℹ️ Serverless start gần như tức thì, không cần quản lý cluster. Classic cluster cho DLT ở prod đảm bảo latency ổn định 24/7.
 
 ---
 
 ### BƯỚC 11 — Chạy Pipeline Lần Đầu
 
+> ⚠️ **Thứ tự chạy quan trọng** — các job phụ thuộc vào data từ job trước.
+
 ```bash
-# Bước 11a: Load bảng airports reference (chỉ chạy 1 lần duy nhất)
+# Bước 11a: Load bảng airports reference (chỉ chạy 1 lần duy nhất, ~1-2 phút với Serverless)
 databricks bundle run airports_loader_job --target dev
-# Chờ job complete (~3-5 phút)
 
 # Bước 11b: Khởi động DLT streaming pipeline (CONTINUOUS — chạy mãi mãi)
 databricks bundle run skystream_dlt_pipeline --target dev
+# ⏳ Để pipeline chạy ít nhất 5-10 phút để tích lũy data vào Silver/Gold tables
 ```
 
-Theo dõi trên Databricks UI:
+Theo dõi DLT trên Databricks UI:
 1. **Workflows → Delta Live Tables** → click vào pipeline
-2. Thấy graph: `raw_flight_states` → `flights` → 11 Gold tables
+2. Thấy graph: `raw_flight_states` → `flight_states` → 11 Gold tables
 3. Status từng node chuyển sang **Running** (xanh) ✅
 4. Sau ~3 phút, số records bắt đầu tăng trên mỗi node
+
+```bash
+# Bước 11c: Chạy Batch Layer lần đầu (sau khi DLT đã chạy 5+ phút)
+# Bình thường tự chạy lúc 2AM UTC hằng ngày — chạy thủ công lần đầu để có data
+databricks bundle run batch_layer_job --target dev
+# Chờ ~5-10 phút → tạo ra 7 bảng trong schema batch.*
+
+# Bước 11d: Chạy Serving Layer (sau khi batch_layer_job hoàn thành)
+# Bình thường tự chạy lúc 4AM UTC hằng ngày
+databricks bundle run serving_layer_job --target dev
+# Chờ ~3-5 phút → tạo ra 7 serving views (MERGE batch + gold)
+```
+
+**Kiểm tra kết quả:**
+```sql
+-- Kiểm tra các layer đã có data
+SHOW TABLES IN workspace_7474644985505263.reference;  -- airports table
+SHOW TABLES IN workspace_7474644985505263.bronze;
+SHOW TABLES IN workspace_7474644985505263.silver;
+SHOW TABLES IN workspace_7474644985505263.gold;
+SHOW TABLES IN workspace_7474644985505263.batch;      -- sau bước 11c
+SHOW TABLES IN workspace_7474644985505263.serving;    -- sau bước 11d
+```
 
 ---
 
@@ -398,7 +453,9 @@ Theo dõi trên Databricks UI:
 2. Đặt tên: `SkyStream Analytics — Real-time`
 3. Với mỗi widget trong `dashboards/skystream_dashboard.json`, nhấn **Add visualization** → chọn đúng SQL Warehouse → dán query vào
 
-**12 queries chính cần tạo (copy từ `dashboards/skystream_dashboard.json`):**
+**Queries theo từng layer:**
+
+**🟡 Real-time (từ Gold tables — latency <3 phút):**
 
 | # | Tên Widget | Loại | Refresh |
 |---|-----------|------|---------|
@@ -410,10 +467,18 @@ Theo dõi trên Databricks UI:
 | 6 | 🏢 Airline Market Share | Bar chart | 60s |
 | 7 | 📦 Cargo Flow by Carrier | Bar chart | 60s |
 | 8 | 🛬 Airport Congestion | Table | 60s |
-| 9 | 🏖️ Tourism Demand Signal | Bar chart | 2 phút |
-| 10 | ⛽ Fuel Burn Estimate | Bar chart | 2 phút |
-| 11 | 📉 Economic Activity Index | Table | 5 phút |
-| 12 | 🗺️ Route Demand Surge Zones | Table | 2 phút |
+
+**🔵 Batch Trend (từ Serving tables — cập nhật mỗi ngày):**
+
+| # | Tên Widget | Loại | Refresh |
+|---|-----------|------|---------|
+| 9 | 📈 Airline 360 (reliability + growth signal) | Table | 1h |
+| 10 | 🏆 Airport Ops Ranking | Bar chart | 1h |
+| 11 | 🚀 Route Investment Signal | Table | 1h |
+| 12 | ♻️ Sustainability / ESG Report | Bar chart | 1h |
+| 13 | 🏖️ Tourism Demand Signal vs Seasonal Avg | Bar chart | 1h |
+| 14 | 📉 Economic Dashboard (weekly index trend) | Line chart | 1h |
+| 15 | 📦 Cargo Trade Lane Intelligence | Table | 1h |
 
 #### 12c. Bật Auto-Refresh
 1. Trên Dashboard → nhấn **⋮ (3 chấm)** → **Schedule**
@@ -456,7 +521,7 @@ git push -u origin develop
 
 Vào GitHub repo → **Settings** (tab trên cùng) → **Secrets and variables** → **Actions** → **New repository secret**
 
-Thêm lần lượt **7 secrets** sau:
+Thêm lần lượt **6 secrets** sau:
 
 | Secret Name | Giá trị | Lấy từ đâu |
 |-------------|---------|------------|
@@ -549,29 +614,40 @@ Chạy trong notebook hoặc SQL Editor:
 ```sql
 -- Bronze đang tăng?
 SELECT COUNT(*) AS total, MAX(_bronze_ingested_at) AS latest_record
-FROM bronze.raw_flight_states;
+FROM workspace_7474644985505263.bronze.raw_flight_states;
 
 -- Silver đang update real-time?
 SELECT flight_phase, COUNT(*) AS cnt
-FROM silver.flights
-WHERE snapshot_time_ts >= current_timestamp() - INTERVAL 2 MINUTES
+FROM workspace_7474644985505263.silver.flight_states
+WHERE snapshot_time >= current_timestamp() - INTERVAL 2 MINUTES
 GROUP BY flight_phase ORDER BY cnt DESC;
 
 -- Gold có insight?
 SELECT airline_icao, active_aircraft, market_share_pct
-FROM gold.airline_market_share
+FROM workspace_7474644985505263.gold.airline_market_share
 ORDER BY active_aircraft DESC LIMIT 10;
 
 -- Cảnh báo nào đang active?
 SELECT alert_type, callsign, origin_country, altitude_m, vertical_rate, alert_generated_at
-FROM gold.flight_alerts
+FROM workspace_7474644985505263.gold.flight_alerts
 ORDER BY alert_generated_at DESC LIMIT 10;
+
+-- Batch layer đã chạy chưa?
+SELECT airline_icao, reliability_score, airborne_pct, total_snapshots_30d
+FROM workspace_7474644985505263.batch.airline_reliability
+ORDER BY reliability_score DESC LIMIT 10;
+
+-- Serving layer — investment signal
+SELECT airline_icao, growth_rate_pct, live_market_share_pct, investment_signal
+FROM workspace_7474644985505263.serving.airline_360
+ORDER BY growth_rate_pct DESC LIMIT 10;
 ```
 
 ---
 
 ## ⚡ End-to-End Latency
 
+### Speed Layer (real-time)
 | Giai đoạn | Thời gian |
 |-----------|-----------|
 | OpenSky cập nhật → Lambda nhận | ~10 giây |
@@ -579,7 +655,14 @@ ORDER BY alert_generated_at DESC LIMIT 10;
 | Kinesis → S3 (Firehose buffer) | **tối đa 60 giây** ← bottleneck chính |
 | S3 → Bronze (Auto Loader) | ~30 giây |
 | Bronze → Silver → Gold (DLT) | ~20-30 giây |
-| **Tổng end-to-end** | **~2-3 phút** |
+| **Tổng Speed Layer** | **~2-3 phút** |
+
+### Batch + Serving Layer (historical trends)
+| Giai đoạn | Thời gian |
+|-----------|-----------|
+| Batch Layer xử lý 30 ngày Silver | ~5-10 phút (chạy lúc 2AM) |
+| Serving Layer MERGE batch + gold | ~3-5 phút (chạy lúc 4AM) |
+| **Freshness của Serving views** | **Cập nhật 1 lần/ngày** |
 
 ---
 
