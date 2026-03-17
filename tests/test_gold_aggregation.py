@@ -163,11 +163,12 @@ class TestAirspaceDensity:
         density = silver_df.groupBy("lat_bin", "lon_bin").agg(
             F.count("icao24").alias("flight_count")
         )
-        # lat_bin=41, lon_bin=-88 should have 3 snapshots (aa1@12:00, ff6@12:00, aa1@12:01)
+        # aa1 appears at lat=41→lat_bin=41, lon=-87.6→lon_bin=-88 in 2 snapshots (12:00 and 12:01)
+        # ff6 lat=42→lat_bin=42 (different bin) → expected count = 2
         bin_row = density.filter(
             (F.col("lat_bin") == 41) & (F.col("lon_bin") == -88)
         ).select("flight_count").first()
-        assert bin_row["flight_count"] == 3
+        assert bin_row["flight_count"] == 2
 
 
 class TestEconomicActivityIndex:
