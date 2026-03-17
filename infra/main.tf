@@ -361,7 +361,31 @@ resource "aws_iam_role_policy" "databricks_policy" {
           "kinesis:ListStreams"
         ]
         Resource = aws_kinesis_stream.flights.arn
+      },
+      {
+        # Allow the role to pass itself to EC2 instances
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-databricks-role"
       }
     ]
+  })
+}
+
+data "aws_caller_identity" "current" {}
+
+# Grant Databricks cross-account role permission to PassRole (only if role name is provided)
+resource "aws_iam_role_policy" "databricks_cross_account_passrole" {
+  count = var.databricks_cross_account_role_name != "" ? 1 : 0
+  name  = "${var.project_name}-passrole-policy"
+  role  = var.databricks_cross_account_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "iam:PassRole"
+      Resource = aws_iam_role.databricks_role.arn
+    }]
   })
 }

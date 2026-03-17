@@ -91,6 +91,12 @@ variable "databricks_external_id" {
   default     = ""
 }
 
+variable "databricks_cross_account_role_name" {
+  description = "Name of the Databricks cross-account IAM role (from AWS IAM console, starts with 'databricks-')"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags applied to all AWS resources"
   type        = map(string)
