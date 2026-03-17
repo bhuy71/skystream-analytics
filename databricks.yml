@@ -27,10 +27,11 @@ resources:
   pipelines:
     skystream_dlt_pipeline:
       name: "SkyStream Analytics — DLT Pipeline [${bundle.target}]"
-      target: skystream_${bundle.target}           # schema prefix per environment
-      continuous: true                              # CONTINUOUS streaming mode
-      photon: true                                  # Photon engine cho throughput cao
-      development: true                             # dev mode = cheaper cluster (overridden in prod target)
+      catalog: workspace_7474644985505263
+      target: skystream_${bundle.target}
+      continuous: true
+      photon: true
+      development: true
 
       libraries:
         - notebook:
@@ -50,13 +51,7 @@ resources:
           spark_conf:
             spark.databricks.delta.preview.enabled: "true"
           aws_attributes:
-            instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"   # điền ARN từ terraform output databricks_instance_profile_arn
-
-      notifications:
-        - email_recipients:
-            - "buivanhuy0701@gmail.com"                       # điền email nhận thông báo lỗi pipeline
-          alerts:
-            - on_flow_failure
+            instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
 
   # ── Databricks Jobs ──────────────────────────────────────────────────────────
   jobs:
@@ -72,10 +67,11 @@ resources:
             notebook_path: ${workspace.file_path}/reference/airports_loader.py
             source: WORKSPACE
           new_cluster:
-            node_type_id: "m5.xlarge"
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
             num_workers: 1
             aws_attributes:
-              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"   # điền ARN từ terraform output databricks_instance_profile_arn
+              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
 
     # Job 2: Chạy notebook Bronze → Silver → Gold riêng lẻ (không dùng DLT)
     # Dùng cho debug hoặc môi trường không có DLT license
@@ -91,10 +87,11 @@ resources:
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
+            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 1
             aws_attributes:
-              instance_profile_arn: ""
+              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
 
         - task_key: silver
           depends_on:
@@ -105,6 +102,7 @@ resources:
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
+            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 1
 
@@ -117,6 +115,7 @@ resources:
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
+            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 2
 
