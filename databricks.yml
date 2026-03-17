@@ -20,16 +20,6 @@ variables:
     description: "Unity Catalog catalog name (hoặc hive_metastore)"
     default: "hive_metastore"
 
-# ─── Artifacts: upload notebooks lên Databricks Workspace ─────────────────────
-artifacts:
-  notebooks:
-    type: files
-    path: /Shared/skystream-analytics/${bundle.target}
-
-  reference:
-    type: files
-    path: /Shared/skystream-analytics/${bundle.target}/reference
-
 # ─── Resources ────────────────────────────────────────────────────────────────
 resources:
 
@@ -44,7 +34,7 @@ resources:
 
       libraries:
         - notebook:
-            path: /Shared/skystream-analytics/${bundle.target}/04_dlt_pipeline.py
+            path: ${workspace.file_path}/notebooks/04_dlt_pipeline.py
 
       configuration:
         S3_BUCKET: ${var.s3_bucket}
@@ -60,11 +50,11 @@ resources:
           spark_conf:
             spark.databricks.delta.preview.enabled: "true"
           aws_attributes:
-            instance_profile_arn: ""   # điền ARN từ terraform output databricks_instance_profile_arn
+            instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"   # điền ARN từ terraform output databricks_instance_profile_arn
 
       notifications:
         - email_recipients:
-            - ""                       # điền email nhận thông báo lỗi pipeline
+            - "buivanhuy0701@gmail.com"                       # điền email nhận thông báo lỗi pipeline
           alerts:
             - on_flow_failure
 
@@ -79,13 +69,13 @@ resources:
       tasks:
         - task_key: load_airports
           notebook_task:
-            notebook_path: /Shared/skystream-analytics/${bundle.target}/reference/airports_loader.py
+            notebook_path: ${workspace.file_path}/reference/airports_loader.py
             source: WORKSPACE
           new_cluster:
             node_type_id: "m5.xlarge"
             num_workers: 1
             aws_attributes:
-              instance_profile_arn: ""  # điền ARN từ terraform output databricks_instance_profile_arn
+              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"   # điền ARN từ terraform output databricks_instance_profile_arn
 
     # Job 2: Chạy notebook Bronze → Silver → Gold riêng lẻ (không dùng DLT)
     # Dùng cho debug hoặc môi trường không có DLT license
@@ -96,7 +86,7 @@ resources:
       tasks:
         - task_key: bronze
           notebook_task:
-            notebook_path: /Shared/skystream-analytics/${bundle.target}/01_bronze_autoloader.py
+            notebook_path: ${workspace.file_path}/notebooks/01_bronze_autoloader.py
             source: WORKSPACE
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
@@ -110,7 +100,7 @@ resources:
           depends_on:
             - task_key: bronze
           notebook_task:
-            notebook_path: /Shared/skystream-analytics/${bundle.target}/02_silver_transform.py
+            notebook_path: ${workspace.file_path}/notebooks/02_silver_transform.py
             source: WORKSPACE
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
@@ -122,7 +112,7 @@ resources:
           depends_on:
             - task_key: silver
           notebook_task:
-            notebook_path: /Shared/skystream-analytics/${bundle.target}/03_gold_analytics.py
+            notebook_path: ${workspace.file_path}/notebooks/03_gold_analytics.py
             source: WORKSPACE
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
@@ -138,8 +128,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: ""           # điền URL workspace Databricks của bạn (VD: https://xxx.azuredatabricks.net)
-      # Xác thực: dùng PAT token hoặc OAuth (xem README)
+      host: "https://dbc-eb803386-bec5.cloud.databricks.com"          
     variables:
       s3_bucket: "skystream-datalake-dev"
 
@@ -147,7 +136,7 @@ targets:
   prod:
     mode: production
     workspace:
-      host: ""           # prod workspace URL (có thể cùng workspace với dev)
+      host: "https://dbc-eb803386-bec5.cloud.databricks.com"        
     variables:
       s3_bucket: "skystream-datalake-prod"
     resources:
