@@ -77,7 +77,6 @@ print(f"Filtered airports: {df_airports.count()}")
 
 # COMMAND ----------
 
-spark.sql(f"CREATE CATALOG IF NOT EXISTS {CATALOG}")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
 
 df_airports.write.format("delta").mode("overwrite").saveAsTable(REF_TABLE)
