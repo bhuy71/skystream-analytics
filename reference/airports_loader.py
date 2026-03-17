@@ -23,17 +23,16 @@ AIRPORTS_URL = "https://ourairports.com/data/airports.csv"
 
 # COMMAND ----------
 
+import pandas as pd
+
 print(f"Downloading airports data from {AIRPORTS_URL} ...")
 response = requests.get(AIRPORTS_URL, timeout=60)
 response.raise_for_status()
 print(f"Downloaded {len(response.content) / 1024:.0f} KB")
 
 # Load directly into Spark from in-memory string (no DBFS needed)
-df_raw = spark.read \
-    .option("header", "true") \
-    .option("inferSchema", "true") \
-    .option("multiLine", "false") \
-    .csv(spark.sparkContext.parallelize(response.text.splitlines()))
+pd_df = pd.read_csv(io.StringIO(response.text))
+df_raw = spark.createDataFrame(pd_df)
 
 print(f"Total airports in raw data: {df_raw.count()}")
 
