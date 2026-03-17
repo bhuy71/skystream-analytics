@@ -2,30 +2,29 @@
 
 **Real-time Flight Tracking & Business Intelligence Platform**
 
-Streaming data pipeline xây dựng trên **AWS + Databricks** theo kiến trúc **Medallion (Bronze → Silver → Gold)**, sử dụng dữ liệu ADS-B thật từ OpenSky Network. Triển khai CI/CD hoàn toàn tự động qua **Databricks Asset Bundle (DAB)**.
+Streaming data pipeline theo kiến trúc **Medallion (Bronze → Silver → Gold)** xây dựng trên **AWS + Databricks**, sử dụng dữ liệu ADS-B thật từ OpenSky Network. CI/CD hoàn toàn tự động qua **Databricks Asset Bundle (DAB) + GitHub Actions**.
 
 ---
 
-## 🏗️ Kiến Trúc Tổng Quan
+## 🏗️ Kiến Trúc
 
 ```
-OpenSky Network API (real-time, 10s refresh)
+OpenSky Network API (real-time ADS-B, cập nhật mỗi 10 giây)
+        │ poll mỗi phút (AWS Lambda)
+        ▼
+Amazon Kinesis Data Streams (2 shards)
         │
         ▼
-AWS Lambda (poll mỗi phút)
+Kinesis Firehose → S3 /bronze/raw_states/ (GZIP, buffer 60s)
         │
         ▼
-Amazon Kinesis Data Streams
+Databricks Delta Live Tables — CONTINUOUS mode
+  🥉 Bronze: raw_flight_states
+  🥈 Silver: flights (cleaned, enriched, typed)
+  🥇 Gold:   11 bảng analytics (market share, cargo, tourism, congestion...)
         │
         ▼
-Kinesis Firehose → S3 /bronze/raw_states/ (GZIP, 60s buffer)
-        │
-        ▼
-Databricks Delta Live Tables (CONTINUOUS mode)
-  🥉 Bronze  →  🥈 Silver  →  🥇 Gold (11 bảng analytics)
-        │
-        ▼
-Databricks SQL Dashboard (auto-refresh 30s)
+Databricks SQL Dashboard (auto-refresh 30s) + Alerts
 ```
 
 ---
@@ -34,27 +33,22 @@ Databricks SQL Dashboard (auto-refresh 30s)
 
 ```
 databrick/
-├── databricks.yml              ← Databricks Asset Bundle (DAB) config
-├── .github/
-│   └── workflows/
-│       └── deploy.yml          ← CI/CD GitHub Actions
+├── databricks.yml                  ← Databricks Asset Bundle config (CI/CD entry point)
+├── .github/workflows/deploy.yml    ← GitHub Actions CI/CD pipeline
 ├── infra/
-│   ├── main.tf                 ← Terraform: S3, Kinesis, Lambda, IAM, Firehose
-│   ├── variables.tf
-│   └── outputs.tf
-├── ingestion/
-│   └── lambda_producer/
-│       ├── handler.py          ← Lambda: poll OpenSky → push Kinesis
-│       └── requirements.txt
+│   ├── main.tf                     ← Terraform: S3, Kinesis, Lambda, IAM, Firehose
+│   ├── variables.tf                ← Khai báo biến
+│   └── outputs.tf                  ← Output sau khi terraform apply
+├── ingestion/lambda_producer/
+│   ├── handler.py                  ← Poll OpenSky → gửi Kinesis
+│   └── requirements.txt
 ├── notebooks/
-│   ├── 01_bronze_autoloader.py ← Auto Loader → bronze.raw_flight_states
-│   ├── 02_silver_transform.py  ← Cleaning & enrichment → silver.flights
-│   ├── 03_gold_analytics.py    ← 11 Gold streaming queries
-│   └── 04_dlt_pipeline.py      ← Delta Live Tables (all-in-one, dùng cho DAB)
-├── reference/
-│   └── airports_loader.py      ← One-time: load airports CSV → reference.airports
-├── dashboards/
-│   └── skystream_dashboard.json← Dashboard widget definitions (12 widgets, 3 alerts)
+│   ├── 01_bronze_autoloader.py     ← Auto Loader → bronze.raw_flight_states
+│   ├── 02_silver_transform.py      ← Cleaning & enrichment → silver.flights
+│   ├── 03_gold_analytics.py        ← 11 Gold streaming queries
+│   └── 04_dlt_pipeline.py          ← Delta Live Tables (dùng cho DAB deploy)
+├── reference/airports_loader.py    ← One-time: load airports CSV → Delta table
+├── dashboards/skystream_dashboard.json
 ├── tests/
 │   ├── conftest.py
 │   ├── test_silver_transform.py
@@ -65,444 +59,589 @@ databrick/
 
 ---
 
-## ✅ Yêu Cầu Trước Khi Bắt Đầu
+## ✅ Yêu Cầu Đã Cài Trên Máy
 
-| Công cụ | Phiên bản | Link cài đặt |
-|---------|-----------|--------------|
-| Python | ≥ 3.9 | https://python.org |
-| Java | 11 hoặc 17 | `brew install openjdk@11` |
-| Terraform | ≥ 1.0 | https://developer.hashicorp.com/terraform/install |
-| Databricks CLI | ≥ 0.200 | Xem bên dưới |
-| AWS CLI | ≥ 2.0 | https://aws.amazon.com/cli |
-| Git | bất kỳ | https://git-scm.com |
+| Công cụ | Kiểm tra | Phiên bản cần |
+|---------|----------|---------------|
+| Python | `python3 --version` | ≥ 3.9 |
+| Java | `java -version` | **17** (bắt buộc cho PySpark 4.x) |
+| Terraform | `terraform -version` | ≥ 1.5 |
+| Databricks CLI | `databricks -version` | ≥ 0.200 |
+| AWS CLI | `aws --version` | ≥ 2.0 |
+| Git | `git --version` | bất kỳ |
 
 ---
 
-## 🚀 Hướng Dẫn Triển Khai Từng Bước
+## 🚀 Hướng Dẫn Deploy — Từng Bước
 
-### BƯỚC 0 — Clone & Cài đặt môi trường local
+---
+
+### BƯỚC 1 — Kiểm Tra Môi Trường
+
+Mở **terminal mới** (để `.zshrc` load JAVA_HOME) rồi chạy:
 
 ```bash
-git clone <your-repo-url>
-cd databrick
+java -version    # → openjdk version "17.x.x"
+terraform -version  # → Terraform v1.5.x
+databricks -version # → Databricks CLI v0.2xx
+aws --version    # → aws-cli/2.x.x
+```
 
-# Tạo virtual environment
-python3 -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-# .venv\Scripts\activate        # Windows
-
-# Cài test dependencies
-pip install -r tests/requirements-test.txt
-
-# Cài Databricks CLI
-curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
-databricks --version            # kiểm tra: v0.200+
+Nếu `java` chưa nhận:
+```bash
+source ~/.zshrc
+java -version
 ```
 
 ---
 
-### BƯỚC 1 — Chuẩn Bị Tài Khoản
+### BƯỚC 2 — Tạo AWS Account & Cấu Hình Credentials
 
-#### 1a. AWS Account
-- Tạo tại https://aws.amazon.com/free (có Free Tier 12 tháng)
-- Cài AWS CLI: `brew install awscli`
-- Cấu hình credentials:
-  ```bash
-  aws configure
-  # AWS Access Key ID: <nhập key>
-  # AWS Secret Access Key: <nhập secret>
-  # Default region name: us-east-1
-  ```
+#### 2a. Tạo AWS Account
+- Vào https://aws.amazon.com/free → đăng ký (có Free Tier 12 tháng)
 
-#### 1b. OpenSky Network (nguồn dữ liệu thật)
-- Đăng ký miễn phí: https://opensky-network.org
-- Sau khi có account: rate limit tăng từ 400 → 4,000 requests/day
-- **Test ngay** (không cần account):
-  ```bash
-  curl -s "https://opensky-network.org/api/states/all?lamin=8&lomin=100&lamax=24&lomax=109" \
-    | python3 -c "
-  import json, sys
-  d = json.load(sys.stdin)
-  print(f'Máy bay qua Việt Nam lúc này: {len(d[\"states\"])}')
-  for s in d['states'][:5]:
-      print(f'  {s[1] or \"N/A\":<12} | {s[2]:<20} | Lat:{s[6]:.2f} Lon:{s[5]:.2f} | Alt:{s[7]}m')
-  "
-  ```
+#### 2b. Tạo IAM User
+1. Đăng nhập **AWS Console** → gõ `IAM` trên thanh tìm kiếm → **Users** → **Create user**
+2. **User name**: `skystream-terraform`
+3. Nhấn **Next** → chọn **Attach policies directly** → tick **AdministratorAccess** → **Next** → **Create user**
+4. Click vào user vừa tạo → tab **Security credentials** → **Create access key**
+5. Chọn **Command Line Interface (CLI)** → tick xác nhận → **Next** → **Create access key**
+6. **Copy và lưu lại** `Access key ID` và `Secret access key` (chỉ hiện 1 lần)
 
-#### 1c. Databricks Workspace
-- Free trial 14 ngày: https://www.databricks.com/try-databricks
-- Chọn **AWS** khi được hỏi cloud provider
-- Sau khi tạo xong, lấy:
-  - **Workspace URL**: Settings → ở thanh địa chỉ trình duyệt (VD: `https://dbc-xxx.cloud.databricks.com`)
-  - **Personal Access Token (PAT)**: User Settings → Access Tokens → Generate New Token
+#### 2c. Cấu Hình AWS CLI
+```bash
+aws configure
+```
+Điền lần lượt:
+```
+AWS Access Key ID [None]:     <dán Access key ID vừa copy>
+AWS Secret Access Key [None]: <dán Secret access key vừa copy>
+Default region name [None]:   us-east-1
+Default output format [None]: json
+```
+
+Kiểm tra:
+```bash
+aws sts get-caller-identity
+# Kết quả mong đợi:
+# {
+#     "UserId": "AIDA...",
+#     "Account": "123456789012",   ← ghi nhớ Account ID này
+#     "Arn": "arn:aws:iam::123456789012:user/skystream-terraform"
+# }
+```
 
 ---
 
-### BƯỚC 2 — Deploy Hạ Tầng AWS (Terraform)
+### BƯỚC 3 — Đăng Ký OpenSky Network
+
+1. Vào https://opensky-network.org → **Register** ở góc trên phải
+2. Điền **Username**, **Email**, **Password** → **Register**
+3. Kiểm tra email → click link xác nhận
+4. **Lưu lại** username và password (dùng ở Bước 5)
+
+Test ngay (không cần đăng nhập):
+```bash
+curl -s "https://opensky-network.org/api/states/all?lamin=8&lomin=100&lamax=24&lomax=109" \
+  | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(f'Số máy bay qua Việt Nam lúc này: {len(d[\"states\"])}')
+for s in d['states'][:3]:
+    print(f'  {str(s[1]).strip():<12} | {s[2]:<20} | Alt: {s[7]}m')
+"
+```
+
+---
+
+### BƯỚC 4 — Tạo Databricks Workspace
+
+1. Vào https://www.databricks.com/try-databricks
+2. Điền email → **Get Started Free**
+3. Chọn **AWS** khi hỏi cloud provider
+4. Chọn region **US East (N. Virginia) — us-east-1** (cùng region với S3)
+5. Chờ workspace được tạo (~5 phút) → nhấn **Open Workspace**
+
+#### 4a. Lấy Workspace URL
+- Nhìn vào thanh địa chỉ trình duyệt: `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com`
+- **Copy và lưu lại** toàn bộ URL này
+
+#### 4b. Lấy External ID (cho IAM Role)
+1. Trong Databricks → click icon **⚙️ Settings** (góc trái dưới) → **Security**
+2. Tìm mục **IAM Role** → click **Add IAM Role**
+3. Sẽ thấy hộp thoại hiện ra với **External ID** — dạng: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+4. **Copy và lưu lại** External ID này (dùng ở Bước 5)
+5. **Chưa cần điền gì** — để cửa sổ này mở, sau Bước 5 mới quay lại
+
+#### 4c. Tạo Personal Access Token (PAT)
+1. Databricks → **⚙️ Settings** → **Developer** → **Access tokens**
+2. **Generate new token** → Description: `skystream-cli` → Lifetime: `90` → **Generate**
+3. **Copy token ngay** — dạng `dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (chỉ hiện 1 lần)
+4. Lưu vào nơi an toàn
+
+---
+
+### BƯỚC 5 — Deploy AWS Infrastructure (Terraform)
 
 ```bash
-cd infra
-
-# Khởi tạo Terraform
+cd /Users/admin/databrick/infra
 terraform init
+```
 
-# Tạo file biến (KHÔNG commit file này lên git)
+Tạo file biến cá nhân **(file này đã có trong `.gitignore`, KHÔNG bị commit lên git)**:
+```bash
 cat > terraform.tfvars << 'EOF'
 aws_region             = "us-east-1"
-s3_bucket_name         = "skystream-datalake-dev"   # phải globally unique
-opensky_username       = ""       # optional: OpenSky username
-opensky_password       = ""       # optional: OpenSky password
-databricks_external_id = ""       # lấy từ Databricks workspace Settings > AWS
+s3_bucket_name         = "skystream-datalake-dev"
+opensky_username       = "THAY_BANG_OPENSKY_USERNAME_CUA_BAN"
+opensky_password       = "THAY_BANG_OPENSKY_PASSWORD_CUA_BAN"
+databricks_external_id = "THAY_BANG_EXTERNAL_ID_TU_BUOC_4B"
 EOF
-
-# Xem trước những gì sẽ được tạo
-terraform plan
-
-# Tạo tất cả resources (~2-3 phút)
-terraform apply
 ```
 
-Sau khi apply xong, lưu lại output này:
+> ⚠️ `s3_bucket_name` phải **globally unique** trên toàn AWS. Nếu bị lỗi "bucket already exists" → đổi thành `skystream-datalake-dev-<tên bạn>` VD: `skystream-datalake-dev-john`
+
+Xem trước và deploy:
+```bash
+terraform plan    # xem những gì sẽ được tạo, không tạo gì cả
+
+terraform apply   # gõ "yes" khi được hỏi — chờ ~2-3 phút
+```
+
+**Sau khi apply xong, copy toàn bộ output và lưu lại:**
 ```
 Outputs:
-  databricks_iam_role_arn = "arn:aws:iam::123456789:role/skystream-databricks-role"
-  s3_bucket_name          = "skystream-datalake-dev"
-  kinesis_stream_name     = "flights-stream"
-  bronze_s3_path          = "s3://skystream-datalake-dev/bronze/raw_states/"
+
+databricks_iam_role_arn = "arn:aws:iam::123456789012:role/skystream-databricks-role"
+s3_bucket_name          = "skystream-datalake-dev"
+kinesis_stream_name     = "flights-stream"
+lambda_function_name    = "skystream-opensky-poller"
+firehose_stream_name    = "skystream-flights-to-s3"
+bronze_s3_path          = "s3://skystream-datalake-dev/bronze/raw_states/"
 ```
 
 ```bash
-cd ..  # quay về root
+cd ..  # quay về thư mục root
 ```
 
 ---
 
-### BƯỚC 3 — Cấu Hình Databricks Workspace
+### BƯỚC 6 — Gắn IAM Role vào Databricks
 
-#### 3a. Gắn IAM Role vào Databricks
-1. Đăng nhập Databricks workspace
-2. Vào **Settings → Security → IAM Role** (hoặc **Admin Console → AWS → Instance Profiles**)
-3. Nhập ARN từ Terraform output: `databricks_iam_role_arn`
-4. Nhấn **Add**
+1. Quay lại cửa sổ Databricks từ Bước 4b (hộp thoại Add IAM Role)
+2. Trong ô **IAM Role ARN**, dán giá trị `databricks_iam_role_arn` từ Terraform output
+   - VD: `arn:aws:iam::123456789012:role/skystream-databricks-role`
+3. Nhấn **Add** → IAM Role xuất hiện trong danh sách là thành công ✅
 
-#### 3b. Xác thực Databricks CLI
+---
+
+### BƯỚC 7 — Xác Thực Databricks CLI
+
 ```bash
-# Cách 1: OAuth (khuyến nghị)
-databricks auth login --host https://your-workspace.cloud.databricks.com
-
-# Cách 2: PAT token
-export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
-export DATABRICKS_TOKEN="dapi_xxxxxxxxxxxxx"
-
-# Kiểm tra kết nối
-databricks clusters list
+databricks configure
+```
+Điền:
+```
+Databricks host: https://dbc-xxxxxxxx-xxxx.cloud.databricks.com  ← URL từ Bước 4a
+Token:           dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             ← PAT từ Bước 4c
 ```
 
-#### 3c. Cập nhật databricks.yml
-Mở file `databricks.yml`, điền các giá trị còn trống:
+Kiểm tra kết nối:
+```bash
+databricks clusters list
+# Nếu trả về danh sách (kể cả rỗng) là đã kết nối thành công ✅
+```
 
+---
+
+### BƯỚC 8 — Cập Nhật `databricks.yml` Với Thông Tin Cá Nhân
+
+Mở file:
+```bash
+open -e /Users/admin/databrick/databricks.yml
+# hoặc nếu dùng VS Code:
+# code /Users/admin/databrick/databricks.yml
+```
+
+**Tìm và thay thế 5 chỗ trống** (tìm bằng Cmd+F với chuỗi `""`):
+
+**Chỗ 1 — Workspace URL (target dev):**
 ```yaml
 targets:
   dev:
     workspace:
-      host: "https://your-workspace.cloud.databricks.com"   # ← điền vào đây
-    ...
+      host: "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"   # ← dán URL Bước 4a
+```
 
-resources:
-  pipelines:
-    skystream_dlt_pipeline:
+**Chỗ 2 — Workspace URL (target prod, có thể dùng cùng workspace):**
+```yaml
+  prod:
+    workspace:
+      host: "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"   # ← cùng URL hoặc workspace khác
+```
+
+**Chỗ 3 — IAM Role ARN cho DLT pipeline cluster:**
+```yaml
       clusters:
         - label: default
           aws_attributes:
-            instance_profile_arn: "arn:aws:iam::123456789:role/skystream-databricks-role"  # ← từ terraform output
+            instance_profile_arn: "arn:aws:iam::123456789012:role/skystream-databricks-role"  # ← từ Terraform output
 ```
+
+**Chỗ 4 — IAM Role ARN cho airports_loader_job:**
+```yaml
+    airports_loader_job:
+      tasks:
+        - task_key: load_airports
+          new_cluster:
+            aws_attributes:
+              instance_profile_arn: "arn:aws:iam::123456789012:role/skystream-databricks-role"  # ← từ Terraform output
+```
+
+**Chỗ 5 — Email nhận thông báo khi pipeline lỗi:**
+```yaml
+      notifications:
+        - email_recipients:
+            - "your@email.com"   # ← email của bạn
+```
+
+Lưu file lại.
 
 ---
 
-### BƯỚC 4 — Chạy Unit Tests (Local)
-
-> Yêu cầu: Java 11+ đã cài (`java -version`)
+### BƯỚC 9 — Chạy Unit Tests
 
 ```bash
-# macOS: cài Java nếu chưa có
-brew install openjdk@11
-export JAVA_HOME=$(brew --prefix openjdk@11)
-
-# Chạy tests
+cd /Users/admin/databrick
 source .venv/bin/activate
+
 cd tests
 pytest -v
+```
 
-# Kết quả mong đợi:
-# test_silver_transform.py::TestDataQualityFilters::test_null_latitude_dropped PASSED
-# test_silver_transform.py::TestFlightPhaseClassification::test_climbing_phase PASSED
-# ... (29 tests total, all PASSED)
+Kết quả mong đợi:
+```
+test_silver_transform.py::TestDataQualityFilters::test_null_latitude_dropped PASSED
+test_silver_transform.py::TestFlightPhaseClassification::test_climbing_phase PASSED
+...
+========================= 29 passed in 6.49s =========================
+```
+
+```bash
+cd ..   # quay về root
 ```
 
 ---
 
-### BƯỚC 5 — Deploy Databricks Asset Bundle
+### BƯỚC 10 — Deploy Databricks Asset Bundle
 
 ```bash
-# Validate cấu hình (không cần connect Databricks)
+# Validate — kiểm tra cú pháp và config (không cần kết nối Databricks)
 databricks bundle validate --target dev
 
-# Deploy lên môi trường dev (upload notebooks + tạo DLT pipeline + tạo Jobs)
+# Deploy — upload notebooks + tạo DLT pipeline + tạo Jobs trên Databricks
 databricks bundle deploy --target dev
+```
 
-# Sau deploy, chạy job load airports reference (chỉ cần 1 lần)
+Kết quả mong đợi:
+```
+Uploading bundle files to /Shared/skystream-analytics/dev...
+Deploying resources...
+  Updating pipeline skystream_dlt_pipeline...
+  Updating job airports_loader_job...
+  Updating job skystream_streaming_job...
+Successfully deployed!
+```
+
+Kiểm tra trên Databricks UI:
+- **Workflows → Delta Live Tables** → thấy `SkyStream Analytics — DLT Pipeline [dev]` ✅
+- **Workflows → Jobs** → thấy `SkyStream — Load Airports Reference [dev]` ✅
+
+---
+
+### BƯỚC 11 — Chạy Pipeline Lần Đầu
+
+```bash
+# Bước 11a: Load bảng airports reference (chỉ chạy 1 lần duy nhất)
 databricks bundle run airports_loader_job --target dev
+# Chờ job complete (~3-5 phút)
 
-# Khởi động DLT pipeline streaming (CONTINUOUS mode)
+# Bước 11b: Khởi động DLT streaming pipeline (CONTINUOUS — chạy mãi mãi)
 databricks bundle run skystream_dlt_pipeline --target dev
 ```
 
-Kiểm tra pipeline đang chạy:
-1. Vào Databricks workspace → **Workflows → Delta Live Tables**
-2. Tìm pipeline **"SkyStream Analytics — DLT Pipeline [dev]"**
-3. Status phải là **Running** (màu xanh)
-4. Bạn sẽ thấy data flow: `raw_flight_states` → `flights` → 11 Gold tables
+Theo dõi trên Databricks UI:
+1. **Workflows → Delta Live Tables** → click vào pipeline
+2. Thấy graph: `raw_flight_states` → `flights` → 11 Gold tables
+3. Status từng node chuyển sang **Running** (xanh) ✅
+4. Sau ~3 phút, số records bắt đầu tăng trên mỗi node
 
 ---
 
-### BƯỚC 6 — Tạo Dashboard Real-time
+### BƯỚC 12 — Tạo SQL Dashboard
 
-#### 6a. Tạo SQL Warehouse
-1. Databricks → **SQL → SQL Warehouses → Create**
-2. Chọn **Serverless** (tự động scale, không cần quản lý)
-3. Size: `2X-Small` là đủ cho dashboard
+#### 12a. Tạo SQL Warehouse
+1. Databricks → **SQL** (sidebar trái) → **SQL Warehouses** → **Create SQL Warehouse**
+2. Điền:
+   - **Name**: `skystream-warehouse`
+   - **Type**: Serverless
+   - **Size**: 2X-Small
+3. **Create** → chờ warehouse start (~1 phút)
 
-#### 6b. Tạo Dashboard từ file định nghĩa
-1. Databricks → **SQL → Dashboards → Create Dashboard**
-2. Đặt tên: `SkyStream Analytics`
-3. Thêm lần lượt 12 queries từ file `dashboards/skystream_dashboard.json`
+#### 12b. Tạo Dashboard
+1. Databricks → **SQL** → **Dashboards** → **Create Dashboard**
+2. Đặt tên: `SkyStream Analytics — Real-time`
+3. Với mỗi widget trong `dashboards/skystream_dashboard.json`, nhấn **Add visualization** → chọn đúng SQL Warehouse → dán query vào
 
-**12 widgets trong dashboard:**
+**12 queries chính cần tạo (copy từ `dashboards/skystream_dashboard.json`):**
 
-| Widget | Loại | Refresh |
-|--------|------|---------|
-| ✈️ Aircraft in the Air Right Now | Counter | 30s |
-| 🌍 Top 15 Countries by Active Flights | Bar chart | 60s |
-| 🔴 Flight Alerts (Rapid Descent) | Table | 30s |
-| 📊 Flight Phase Distribution | Pie chart | 60s |
-| 📈 Hourly Traffic Trend (24h) | Line chart | 5 phút |
-| 🏢 Live Airline Market Share | Bar chart | 60s |
-| 📦 Cargo Flow by Carrier | Bar chart | 60s |
-| 🛬 Airport Congestion Scores | Table | 60s |
-| 🏖️ Tourism Demand by Destination | Bar chart | 2 phút |
-| ⛽ Estimated Fuel Burn by Country | Bar chart | 2 phút |
-| 📉 Economic Activity Index | Table | 5 phút |
-| 🗺️ Route Demand Surge Zones | Table | 2 phút |
+| # | Tên Widget | Loại | Refresh |
+|---|-----------|------|---------|
+| 1 | ✈️ Aircraft in the Air | Counter | 30s |
+| 2 | 🌍 Top Countries by Flights | Bar chart | 60s |
+| 3 | 🔴 Flight Alerts | Table | 30s |
+| 4 | 📊 Flight Phase Distribution | Pie chart | 60s |
+| 5 | 📈 Hourly Traffic Trend | Line chart | 5 phút |
+| 6 | 🏢 Airline Market Share | Bar chart | 60s |
+| 7 | 📦 Cargo Flow by Carrier | Bar chart | 60s |
+| 8 | 🛬 Airport Congestion | Table | 60s |
+| 9 | 🏖️ Tourism Demand Signal | Bar chart | 2 phút |
+| 10 | ⛽ Fuel Burn Estimate | Bar chart | 2 phút |
+| 11 | 📉 Economic Activity Index | Table | 5 phút |
+| 12 | 🗺️ Route Demand Surge Zones | Table | 2 phút |
 
-#### 6c. Bật Auto-Refresh
-1. Trong Dashboard, nhấn nút **Schedule**
-2. Set **Auto-refresh: 30 seconds**
-3. Dashboard sẽ tự cập nhật mà không cần F5
-
-#### 6d. Tạo Alerts (Cảnh báo tự động)
-1. Databricks SQL → **Alerts → Create Alert**
-2. Tạo 3 alerts theo file `dashboards/skystream_dashboard.json`:
-   - **Rapid Descent Spike**: > 5 sự kiện hạ độ cao đột ngột / 5 phút → gửi email
-   - **Airport Critical Congestion**: congestion_level = CRITICAL → gửi email
-   - **Tourism Surge**: inbound > 20 flights / 15 phút → gửi email
+#### 12c. Bật Auto-Refresh
+1. Trên Dashboard → nhấn **⋮ (3 chấm)** → **Schedule**
+2. Chọn **Refresh every 30 seconds**
+3. **Save** → Dashboard tự cập nhật liên tục ✅
 
 ---
 
-### BƯỚC 7 — Cài Đặt CI/CD với GitHub Actions
+### BƯỚC 13 — Setup CI/CD GitHub Actions
 
-#### 7a. Tạo GitHub Repository
+#### 13a. Tạo GitHub Repository và Push Code
+
 ```bash
-git init
-git add .
-git commit -m "feat: initial SkyStream Analytics implementation"
-git remote add origin https://github.com/your-username/skystream-analytics.git
+cd /Users/admin/databrick
+
+# Cách 1: Dùng GitHub CLI (nếu đã cài)
+gh auth login
+gh repo create skystream-analytics --public --source=. --push
+
+# Cách 2: Thủ công
+# 1. Vào https://github.com/new
+# 2. Repository name: skystream-analytics
+# 3. KHÔNG tick "Add README", "Add .gitignore", "Add license"
+# 4. Create repository → copy lệnh hiển thị
+git remote add origin https://github.com/<your-username>/skystream-analytics.git
+git branch -M main
 git push -u origin main
 ```
 
-#### 7b. Thêm Secrets vào GitHub
-Vào GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**:
+#### 13b. Tạo Branch `develop`
 
-| Secret Name | Giá trị |
-|-------------|---------|
-| `DATABRICKS_HOST` | `https://your-workspace.cloud.databricks.com` |
-| `DATABRICKS_TOKEN` | PAT token từ Databricks User Settings |
-| `AWS_ACCESS_KEY_ID` | AWS IAM User access key |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM User secret key |
-| `TF_VAR_opensky_username` | OpenSky username (optional) |
-| `TF_VAR_opensky_password` | OpenSky password (optional) |
-| `TF_VAR_databricks_external_id` | External ID từ Databricks workspace |
-
-#### 7c. Tạo Branch Strategy
 ```bash
-# Branch develop → deploy môi trường dev
 git checkout -b develop
+git push -u origin develop
+```
+
+> Từ đây: dev hằng ngày trên branch `develop`, merge vào `main` khi muốn deploy production.
+
+#### 13c. Thêm Secrets vào GitHub
+
+Vào GitHub repo → **Settings** (tab trên cùng) → **Secrets and variables** → **Actions** → **New repository secret**
+
+Thêm lần lượt **7 secrets** sau:
+
+| Secret Name | Giá trị | Lấy từ đâu |
+|-------------|---------|------------|
+| `DATABRICKS_HOST` | `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com` | Bước 4a |
+| `DATABRICKS_TOKEN` | `dapi_xxxxxxxxxxxxxxxx` | Bước 4c |
+| `AWS_ACCESS_KEY_ID` | `AKIA...` | Bước 2b |
+| `AWS_SECRET_ACCESS_KEY` | `xxxxxxxx` | Bước 2b |
+| `TF_VAR_opensky_username` | username OpenSky | Bước 3 |
+| `TF_VAR_opensky_password` | password OpenSky | Bước 3 |
+| `TF_VAR_databricks_external_id` | UUID External ID | Bước 4b |
+
+> Cách thêm từng secret: **New repository secret** → điền **Name** → điền **Secret** → **Add secret**
+
+#### 13d. Kiểm Tra CI/CD Chạy
+
+Push 1 commit nhỏ để trigger workflow:
+```bash
+cd /Users/admin/databrick
+git checkout develop
+echo "# trigger ci" >> .trigger
+git add .trigger && git commit -m "ci: trigger first workflow run"
 git push origin develop
-
-# Branch main → deploy môi trường prod
-# (chỉ merge vào main sau khi test kỹ trên develop)
 ```
 
-#### 7d. CI/CD Flow hoạt động như sau:
-
+Vào GitHub repo → **Actions** tab → thấy workflow đang chạy:
 ```
-Developer push code
-        │
-        ▼
-GitHub Actions trigger
-        │
-        ├─ [Mọi PR/push] Validate bundle (databricks bundle validate)
-        │
-        ├─ [Mọi PR/push] Unit Tests (pytest với PySpark local)
-        │
-        ├─ [Push vào develop] → Terraform apply → Bundle deploy → dev
-        │
-        └─ [Push vào main]   → Terraform apply → Bundle deploy → prod
-                                                        │
-                                                        ▼
-                                              DLT Pipeline restart
-                                              (CONTINUOUS mode, auto-recover)
+✅ Validate Bundle        (~30 giây)
+✅ Unit Tests             (~2 phút)
+✅ Deploy AWS Infra       (~3 phút)  — chỉ chạy khi push, không chạy khi PR
+✅ Deploy Databricks Bundle (~2 phút)
+```
+
+Xóa file trigger tạm:
+```bash
+git rm .trigger && git commit -m "chore: remove trigger file" && git push
 ```
 
 ---
 
-## 📊 Kiểm Tra Pipeline Đang Chạy
+## 🔄 Workflow Hằng Ngày (Sau Khi Setup Xong)
 
-### Kiểm tra data đang flow
 ```bash
-# Kiểm tra S3 đang nhận data
+# Làm việc trên develop
+git checkout develop
+
+# Sửa code...
+
+git add .
+git commit -m "feat: mô tả thay đổi"
+git push origin develop
+# → GitHub Actions tự chạy: validate → test → deploy dev
+
+# Khi muốn lên production
+git checkout main
+git merge develop
+git push origin main
+# → GitHub Actions tự chạy: validate → test → deploy prod
+```
+
+---
+
+## 🔍 Kiểm Tra Pipeline Đang Chạy
+
+### Kiểm tra data đang flow vào S3
+```bash
 aws s3 ls s3://skystream-datalake-dev/bronze/raw_states/ --recursive | tail -5
+# Phải thấy file .gz mới trong vòng 60-90 giây gần nhất
+```
 
-# Kiểm tra Lambda đang chạy
+### Kiểm tra Lambda đang hoạt động
+```bash
 aws logs tail /aws/lambda/skystream-opensky-poller --follow
+# Phải thấy log dạng:
+# [Poll 1/6] Fetching OpenSky states...
+# [Poll 1/6] total=12500, valid=12300, published=12300
+```
 
-# Kiểm tra Kinesis metrics
+### Kiểm tra Kinesis có records
+```bash
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Kinesis \
   --metric-name IncomingRecords \
   --dimensions Name=StreamName,Value=flights-stream \
-  --start-time $(date -u -v-10M +%Y-%m-%dT%H:%M:%SZ) \
+  --start-time $(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  --period 60 \
-  --statistics Sum
+  --period 60 --statistics Sum
 ```
 
-### Kiểm tra Delta Tables trong Databricks
-Chạy trong Databricks notebook:
+### Kiểm tra Delta tables trong Databricks
+Chạy trong notebook hoặc SQL Editor:
 ```sql
--- Kiểm tra Bronze đang tăng
-SELECT COUNT(*) as total, MAX(_bronze_ingested_at) as latest FROM bronze.raw_flight_states;
+-- Bronze đang tăng?
+SELECT COUNT(*) AS total, MAX(_bronze_ingested_at) AS latest_record
+FROM bronze.raw_flight_states;
 
--- Kiểm tra Silver
-SELECT flight_phase, COUNT(*) as cnt
+-- Silver đang update real-time?
+SELECT flight_phase, COUNT(*) AS cnt
 FROM silver.flights
 WHERE snapshot_time_ts >= current_timestamp() - INTERVAL 2 MINUTES
-GROUP BY flight_phase;
+GROUP BY flight_phase ORDER BY cnt DESC;
 
--- Kiểm tra Gold alerts
-SELECT * FROM gold.flight_alerts
-ORDER BY alert_generated_at DESC
-LIMIT 10;
-
--- Kiểm tra market share
+-- Gold có insight?
 SELECT airline_icao, active_aircraft, market_share_pct
 FROM gold.airline_market_share
-WHERE window_start >= current_timestamp() - INTERVAL 10 MINUTES
-ORDER BY active_aircraft DESC
-LIMIT 10;
+ORDER BY active_aircraft DESC LIMIT 10;
+
+-- Cảnh báo nào đang active?
+SELECT alert_type, callsign, origin_country, altitude_m, vertical_rate, alert_generated_at
+FROM gold.flight_alerts
+ORDER BY alert_generated_at DESC LIMIT 10;
 ```
 
 ---
 
 ## ⚡ End-to-End Latency
 
-| Stage | Latency |
-|-------|---------|
-| OpenSky cập nhật dữ liệu | Mỗi 10 giây |
-| Lambda poll → Kinesis | +10–15 giây |
-| Kinesis Firehose → S3 | +60 giây (buffer) |
-| Auto Loader → Bronze table | +30 giây |
-| Bronze → Silver (DLT) | +10–15 giây |
-| Silver → Gold (DLT) | +10–15 giây |
-| **Total end-to-end** | **~2–3 phút** |
+| Giai đoạn | Thời gian |
+|-----------|-----------|
+| OpenSky cập nhật → Lambda nhận | ~10 giây |
+| Lambda → Kinesis | ~1-2 giây |
+| Kinesis → S3 (Firehose buffer) | **tối đa 60 giây** ← bottleneck chính |
+| S3 → Bronze (Auto Loader) | ~30 giây |
+| Bronze → Silver → Gold (DLT) | ~20-30 giây |
+| **Tổng end-to-end** | **~2-3 phút** |
 
-Dashboard refresh 30 giây → người dùng thấy dữ liệu **cũ nhất 3–4 phút**.
+---
+
+## 🔧 Xử Lý Lỗi Thường Gặp
+
+### Lambda không gửi được data
+```bash
+# Xem log Lambda
+aws logs tail /aws/lambda/skystream-opensky-poller --follow
+
+# Lỗi thường gặp:
+# "rate limit reached" → thêm OpenSky credentials vào Lambda env vars trong AWS Console
+# "AccessDeniedException" → kiểm tra IAM policy của Lambda role
+```
+
+### `terraform apply` lỗi "BucketAlreadyExists"
+```
+# Đổi tên bucket trong terraform.tfvars thành tên unique hơn
+s3_bucket_name = "skystream-datalake-dev-yourname-2024"
+```
+
+### `databricks bundle deploy` lỗi "Host not configured"
+```bash
+# Kiểm tra host đã được điền trong databricks.yml chưa
+grep "host:" /Users/admin/databrick/databricks.yml
+
+# Hoặc set qua env var
+export DATABRICKS_HOST="https://dbc-xxx.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi_xxx"
+databricks bundle deploy --target dev
+```
+
+### DLT Pipeline lỗi "InstanceProfileArn not found"
+- Kiểm tra `instance_profile_arn` trong `databricks.yml` đã được điền đúng ARN từ Terraform output chưa
+- Kiểm tra IAM Role đã được add vào Databricks workspace ở Bước 6 chưa
+
+### Auto Loader không nhận file mới
+```bash
+# Kiểm tra Firehose có đang ghi xuống S3 không
+aws firehose describe-delivery-stream \
+  --delivery-stream-name skystream-flights-to-s3 \
+  --query 'DeliveryStreamDescription.DeliveryStreamStatus'
+# Phải trả về "ACTIVE"
+```
 
 ---
 
 ## 💰 Chi Phí Ước Tính
 
-| Dịch vụ | Free Tier | Chi phí/tháng (dev) |
-|---------|-----------|---------------------|
+| Dịch vụ | Free Tier | Chi phí dev/tháng |
+|---------|-----------|-------------------|
 | Kinesis Data Streams (2 shards) | 1 shard free/12 tháng | ~$22 |
-| Kinesis Firehose | 5GB free | ~$0.50 |
+| Kinesis Firehose | 5GB/tháng free | ~$0.50 |
 | S3 (~10GB) | 5GB free | ~$0.50 |
 | AWS Lambda | 1M invocations free | ~$0 |
-| Databricks (free trial) | 14 ngày | $0 → ~$40/tháng sau |
-| **Tổng** | | **~$0 (trong free tier)** |
+| Databricks (trial) | 14 ngày free | ~$0 → ~$40/tháng sau |
+| **Tổng** | **~$0 trong free tier** | **~$20-60/tháng** |
 
-> 💡 **Tiết kiệm chi phí**: Chỉ chạy Lambda + Kinesis khi muốn collect data. DLT cluster có auto-terminate. S3 lifecycle rule tự xóa file Bronze sau 30 ngày.
-
----
-
-## 🛠️ Tech Stack
-
-```
-DATA SOURCE    : OpenSky Network REST API (ADS-B, miễn phí, 10s refresh)
-INGESTION      : AWS Lambda + Amazon Kinesis Data Streams + Kinesis Firehose
-STORAGE        : Amazon S3 + Delta Lake (Parquet + transaction log)
-PROCESSING     : Databricks Structured Streaming + Delta Live Tables (DLT)
-CI/CD          : Databricks Asset Bundle (DAB) + GitHub Actions
-ORCHESTRATION  : Databricks Workflows
-SERVING        : Databricks SQL Dashboard (auto-refresh 30s) + Databricks Alerts
-MONITORING     : AWS CloudWatch + Databricks DLT UI + Databricks Lakehouse Monitoring
-INFRA AS CODE  : Terraform
-TESTING        : pytest + PySpark local mode
-ARCHITECTURE   : Medallion (Bronze → Silver → Gold)
-```
-
----
-
-## 🔧 Troubleshooting
-
-### Lambda không gửi data vào Kinesis
-```bash
-# Xem logs Lambda
-aws logs tail /aws/lambda/skystream-opensky-poller --follow
-# Nếu thấy "rate limit reached" → thêm OpenSky username/password vào Lambda env vars
-```
-
-### DLT Pipeline bị lỗi "Schema evolution"
-```python
-# Trong DLT notebook, thêm option:
-.option("cloudFiles.schemaEvolutionMode", "addNewColumns")
-```
-
-### Auto Loader không nhận file mới
-```bash
-# Kiểm tra Firehose delivery status
-aws firehose describe-delivery-stream --delivery-stream-name skystream-flights-to-s3
-# Nếu thấy "ACTIVE" nhưng không có file mới → kiểm tra Kinesis có records không
-```
-
-### databricks bundle deploy thất bại
-```bash
-# Kiểm tra authentication
-databricks auth env --host https://your-workspace.cloud.databricks.com
-
-# Kiểm tra bundle syntax
-databricks bundle validate --target dev
-
-# Deploy với verbose logs
-databricks bundle deploy --target dev --debug
-```
+> 💡 Để tiết kiệm: tắt Lambda trigger khi không dùng (`aws events disable-rule --name skystream-poll-every-minute`), DLT cluster tự terminate khi không có data.
 
 ---
 
 ## 📚 Tài Liệu Tham Khảo
 
-- [Databricks Asset Bundle](https://docs.databricks.com/en/dev-tools/bundles/index.html)
+- [Databricks Asset Bundle docs](https://docs.databricks.com/en/dev-tools/bundles/index.html)
 - [Delta Live Tables](https://docs.databricks.com/en/delta-live-tables/index.html)
 - [Auto Loader](https://docs.databricks.com/en/ingestion/auto-loader/index.html)
 - [OpenSky Network API](https://openskynetwork.github.io/opensky-api/)
-- [Kinesis Firehose → S3](https://docs.aws.amazon.com/firehose/latest/dev/basic-deliver.html)
 - [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
