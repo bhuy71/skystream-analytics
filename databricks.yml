@@ -35,7 +35,7 @@ resources:
 
       libraries:
         - notebook:
-            path: ${workspace.file_path}/notebooks/04_dlt_pipeline.py
+            path: ./notebooks/04_dlt_pipeline.py
 
       configuration:
         S3_BUCKET: ${var.s3_bucket}
@@ -64,8 +64,7 @@ resources:
       tasks:
         - task_key: load_airports
           notebook_task:
-            notebook_path: ${workspace.file_path}/reference/airports_loader.py
-            source: WORKSPACE
+            notebook_path: ./reference/airports_loader.py
           new_cluster:
             spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
@@ -82,8 +81,7 @@ resources:
       tasks:
         - task_key: bronze
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/01_bronze_autoloader.py
-            source: WORKSPACE
+            notebook_path: ./notebooks/01_bronze_autoloader.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
@@ -97,8 +95,7 @@ resources:
           depends_on:
             - task_key: bronze
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/02_silver_transform.py
-            source: WORKSPACE
+            notebook_path: ./notebooks/02_silver_transform.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
@@ -110,8 +107,7 @@ resources:
           depends_on:
             - task_key: silver
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/03_gold_analytics.py
-            source: WORKSPACE
+            notebook_path: ./notebooks/03_gold_analytics.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
