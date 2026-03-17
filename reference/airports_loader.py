@@ -77,9 +77,21 @@ print(f"Filtered airports: {df_airports.count()}")
 
 # COMMAND ----------
 
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+import time
 
-df_airports.write.format("delta").mode("overwrite").saveAsTable(REF_TABLE)
+def retry(fn, retries=5, delays=(5, 10, 20, 30, 60)):
+    for attempt in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == retries - 1:
+                raise
+            wait = delays[min(attempt, len(delays) - 1)]
+            print(f"⚠ Attempt {attempt+1} failed: {e}. Retrying in {wait}s...")
+            time.sleep(wait)
+
+retry(lambda: spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}"))
+retry(lambda: df_airports.write.format("delta").mode("overwrite").saveAsTable(REF_TABLE))
 
 print(f"✓ Written to {REF_TABLE}")
 display(spark.sql(f"SELECT * FROM {REF_TABLE} WHERE type = 'large_airport' LIMIT 20"))
