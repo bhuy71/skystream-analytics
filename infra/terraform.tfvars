@@ -1,0 +1,5 @@
+aws_region                         = "us-east-1"
+s3_bucket_name                     = "skystream-datalake-dev"
+opensky_username                   = "bhuy71"
+opensky_password                   = "@Huy123456"
+databricks_cross_account_role_name = "databricks-3bnyc9ee3vxxfxcxmruu6v-cross-account-role"
