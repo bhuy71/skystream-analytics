@@ -43,15 +43,8 @@ resources:
 
       clusters:
         - label: default
-          node_type_id: "i3.xlarge"
-          num_workers: 1
-          autoscale:
-            min_workers: 1
-            max_workers: 3
           spark_conf:
             spark.databricks.delta.preview.enabled: "true"
-          aws_attributes:
-            instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
 
   # ── Databricks Jobs ──────────────────────────────────────────────────────────
   jobs:
@@ -65,12 +58,12 @@ resources:
         - task_key: load_airports
           notebook_task:
             notebook_path: ./reference/airports_loader.py
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 1
-            aws_attributes:
-              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+          environment_key: serverless
+
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
 
     # Job 2: Chạy notebook Bronze → Silver → Gold riêng lẻ (không dùng DLT)
     # Dùng cho debug hoặc môi trường không có DLT license
@@ -84,12 +77,7 @@ resources:
             notebook_path: ./notebooks/01_bronze_autoloader.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 1
-            aws_attributes:
-              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+          environment_key: serverless
 
         - task_key: silver
           depends_on:
@@ -98,10 +86,7 @@ resources:
             notebook_path: ./notebooks/02_silver_transform.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 1
+          environment_key: serverless
 
         - task_key: gold
           depends_on:
@@ -110,10 +95,12 @@ resources:
             notebook_path: ./notebooks/03_gold_analytics.py
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 2
+          environment_key: serverless
+
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
 
     # Job 3: Batch Layer — chạy mỗi ngày lúc 2:00 AM UTC
     batch_layer_job:
@@ -128,12 +115,12 @@ resources:
         - task_key: run_batch_layer
           notebook_task:
             notebook_path: ./notebooks/05_batch_layer.py
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 2
-            aws_attributes:
-              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+          environment_key: serverless
+
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
 
     # Job 4: Serving Layer — chạy sau Batch Layer, mỗi ngày lúc 4:00 AM UTC
     serving_layer_job:
@@ -148,12 +135,12 @@ resources:
         - task_key: run_serving_layer
           notebook_task:
             notebook_path: ./notebooks/06_serving_layer.py
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 1
-            aws_attributes:
-              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+          environment_key: serverless
+
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "1"
 
 # ─── Targets (environments) ───────────────────────────────────────────────────
 targets:
@@ -179,9 +166,3 @@ targets:
         skystream_dlt_pipeline:
           development: false
           photon: true
-          clusters:
-            - label: default
-              num_workers: 2
-              autoscale:
-                min_workers: 2
-                max_workers: 5
