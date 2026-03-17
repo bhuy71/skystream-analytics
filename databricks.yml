@@ -24,12 +24,10 @@ variables:
 artifacts:
   notebooks:
     type: files
-    source: ./notebooks
     path: /Shared/skystream-analytics/${bundle.target}
 
   reference:
     type: files
-    source: ./reference
     path: /Shared/skystream-analytics/${bundle.target}/reference
 
 # ─── Resources ────────────────────────────────────────────────────────────────
@@ -42,7 +40,7 @@ resources:
       target: skystream_${bundle.target}           # schema prefix per environment
       continuous: true                              # CONTINUOUS streaming mode
       photon: true                                  # Photon engine cho throughput cao
-      development: ${bundle.target == 'dev'}        # dev mode = cheaper cluster
+      development: true                             # dev mode = cheaper cluster (overridden in prod target)
 
       libraries:
         - notebook:
@@ -54,7 +52,6 @@ resources:
 
       clusters:
         - label: default
-          spark_version: "15.4.x-scala2.12"
           node_type_id: "i3.xlarge"
           num_workers: 1
           autoscale:
@@ -63,7 +60,7 @@ resources:
           spark_conf:
             spark.databricks.delta.preview.enabled: "true"
           aws_attributes:
-            instance_profile_arn: ""   # điền ARN từ terraform output databricks_iam_role_arn
+            instance_profile_arn: ""   # điền ARN từ terraform output databricks_instance_profile_arn
 
       notifications:
         - email_recipients:
@@ -85,11 +82,10 @@ resources:
             notebook_path: /Shared/skystream-analytics/${bundle.target}/reference/airports_loader.py
             source: WORKSPACE
           new_cluster:
-            spark_version: "15.4.x-scala2.12"
             node_type_id: "m5.xlarge"
             num_workers: 1
             aws_attributes:
-              instance_profile_arn: ""  # điền ARN từ terraform output
+              instance_profile_arn: ""  # điền ARN từ terraform output databricks_instance_profile_arn
 
     # Job 2: Chạy notebook Bronze → Silver → Gold riêng lẻ (không dùng DLT)
     # Dùng cho debug hoặc môi trường không có DLT license
@@ -105,7 +101,6 @@ resources:
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
-            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 1
             aws_attributes:
@@ -119,10 +114,7 @@ resources:
             source: WORKSPACE
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
-          existing_cluster_id: ""  # reuse cluster từ bronze task nếu muốn
-
           new_cluster:
-            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 1
 
@@ -135,7 +127,6 @@ resources:
             base_parameters:
               S3_BUCKET: ${var.s3_bucket}
           new_cluster:
-            spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 2
 
