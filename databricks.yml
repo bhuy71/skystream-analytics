@@ -41,11 +41,6 @@ resources:
         S3_BUCKET: ${var.s3_bucket}
         TRIGGER_INTERVAL: "10 seconds"
 
-      clusters:
-        - label: default
-          spark_conf:
-            spark.databricks.delta.preview.enabled: "true"
-
   # ── Databricks Jobs ──────────────────────────────────────────────────────────
   jobs:
 
