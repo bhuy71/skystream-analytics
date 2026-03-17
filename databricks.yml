@@ -115,6 +115,46 @@ resources:
             node_type_id: "i3.xlarge"
             num_workers: 2
 
+    # Job 3: Batch Layer — chạy mỗi ngày lúc 2:00 AM UTC
+    batch_layer_job:
+      name: "SkyStream — Batch Layer (Lambda) [${bundle.target}]"
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "UTC"
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: run_batch_layer
+          notebook_task:
+            notebook_path: ./notebooks/05_batch_layer.py
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 2
+            aws_attributes:
+              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+
+    # Job 4: Serving Layer — chạy sau Batch Layer, mỗi ngày lúc 4:00 AM UTC
+    serving_layer_job:
+      name: "SkyStream — Serving Layer (Lambda) [${bundle.target}]"
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 4 * * ?"
+        timezone_id: "UTC"
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: run_serving_layer
+          notebook_task:
+            notebook_path: ./notebooks/06_serving_layer.py
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 1
+            aws_attributes:
+              instance_profile_arn: "arn:aws:iam::020426224060:instance-profile/skystream-databricks-role"
+
 # ─── Targets (environments) ───────────────────────────────────────────────────
 targets:
 

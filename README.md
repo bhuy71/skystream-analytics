@@ -163,7 +163,7 @@ for s in d['states'][:3]:
 5. Chờ workspace được tạo (~5 phút) → nhấn **Open Workspace**
 
 #### 4a. Lấy Workspace URL
-- Nhìn vào thanh địa chỉ trình duyệt: `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com`
+- Nhìn vào thanh địa chỉ trình duyệt: `https://dbc-eb803386-bec5.cloud.databricks.com/`
 - **Copy và lưu lại** toàn bộ URL này
 
 #### 4b. Tạo Personal Access Token (PAT)
@@ -176,6 +176,7 @@ for s in d['states'][:3]:
    - **API scope(s)**: tick các scope: `clusters`, `jobs`, `pipelines`, `dbfs`, `sql`, `files`
      *(hoặc tick `all APIs` nếu là workspace cá nhân)*
 4. Click **Generate** → **copy token ngay** — dạng `dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (chỉ hiện 1 lần)
+
 5. Lưu vào nơi an toàn
 
 > ℹ️ **External ID không bắt buộc** — project này không yêu cầu. Terraform sẽ tạo IAM role mà không cần External ID.
@@ -194,8 +195,8 @@ Tạo file biến cá nhân **(file này đã có trong `.gitignore`, KHÔNG b�
 cat > terraform.tfvars << 'EOF'
 aws_region       = "us-east-1"
 s3_bucket_name   = "skystream-datalake-dev"
-opensky_username = "THAY_BANG_OPENSKY_USERNAME_CUA_BAN"
-opensky_password = "THAY_BANG_OPENSKY_PASSWORD_CUA_BAN"
+opensky_username = "bhuy71"
+opensky_password = "@Huy123456"
 EOF
 ```
 
