@@ -212,12 +212,13 @@ terraform apply   # gõ "yes" khi được hỏi — chờ ~2-3 phút
 ```
 Outputs:
 
-databricks_iam_role_arn = "arn:aws:iam::123456789012:role/skystream-databricks-role"
-s3_bucket_name          = "skystream-datalake-dev"
-kinesis_stream_name     = "flights-stream"
-lambda_function_name    = "skystream-opensky-poller"
-firehose_stream_name    = "skystream-flights-to-s3"
-bronze_s3_path          = "s3://skystream-datalake-dev/bronze/raw_states/"
+databricks_iam_role_arn             = "arn:aws:iam::123456789012:role/skystream-databricks-role"
+databricks_instance_profile_arn     = "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"
+s3_bucket_name                      = "skystream-datalake-dev"
+kinesis_stream_name                 = "flights-stream"
+lambda_function_name                = "skystream-opensky-poller"
+firehose_stream_name                = "skystream-flights-to-s3"
+bronze_s3_path                      = "s3://skystream-datalake-dev/bronze/raw_states/"
 ```
 
 ```bash
@@ -230,10 +231,12 @@ cd ..  # quay về thư mục root
 
 1. Vào Databricks workspace → **⚙️ Settings** (góc trái dưới) → **Security**
 2. Tìm mục **Instance profiles** → click **Add instance profile**
-3. Trong ô **Instance profile ARN**, dán giá trị `databricks_iam_role_arn` từ Terraform output
-   - VD: `arn:aws:iam::123456789012:role/skystream-databricks-role`
-4. Bỏ tick **Skip validation** (để Databricks tự kiểm tra)
-5. Nhấn **Add** → Instance profile xuất hiện trong danh sách là thành công ✅
+3. Trong ô **Instance profile ARN**, dán giá trị `databricks_instance_profile_arn` từ Terraform output
+   - Dạng: `arn:aws:iam::020426224060:instance-profile/skystream-databricks-role`
+4. Trong ô **IAM role ARN**, dán giá trị `databricks_iam_role_arn` từ Terraform output
+   - Dạng: `arn:aws:iam::020426224060:role/skystream-databricks-role`
+5. Bỏ tick **Skip validation** (để Databricks tự kiểm tra)
+6. Nhấn **Add** → Instance profile xuất hiện trong danh sách là thành công ✅
 
 ---
 
@@ -282,22 +285,22 @@ targets:
       host: "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"   # ← cùng URL hoặc workspace khác
 ```
 
-**Chỗ 3 — IAM Role ARN cho DLT pipeline cluster:**
+**Chỗ 3 — Instance Profile ARN cho DLT pipeline cluster:**
 ```yaml
       clusters:
         - label: default
           aws_attributes:
-            instance_profile_arn: "arn:aws:iam::123456789012:role/skystream-databricks-role"  # ← từ Terraform output
+            instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"  # ← databricks_instance_profile_arn từ Terraform output
 ```
 
-**Chỗ 4 — IAM Role ARN cho airports_loader_job:**
+**Chỗ 4 — Instance Profile ARN cho airports_loader_job:**
 ```yaml
     airports_loader_job:
       tasks:
         - task_key: load_airports
           new_cluster:
             aws_attributes:
-              instance_profile_arn: "arn:aws:iam::123456789012:role/skystream-databricks-role"  # ← từ Terraform output
+              instance_profile_arn: "arn:aws:iam::123456789012:instance-profile/skystream-databricks-role"  # ← databricks_instance_profile_arn từ Terraform output
 ```
 
 **Chỗ 5 — Email nhận thông báo khi pipeline lỗi:**

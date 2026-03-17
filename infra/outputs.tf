@@ -38,6 +38,11 @@ output "databricks_iam_role_arn" {
   value       = aws_iam_role.databricks_role.arn
 }
 
+output "databricks_instance_profile_arn" {
+  description = "Instance Profile ARN — paste this into Databricks > Settings > Security > Instance profiles"
+  value       = aws_iam_instance_profile.databricks_instance_profile.arn
+}
+
 output "bronze_s3_path" {
   description = "S3 path for Bronze raw data (use in Databricks Auto Loader)"
   value       = "s3://${aws_s3_bucket.datalake.bucket}/bronze/raw_states/"

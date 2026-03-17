@@ -322,6 +322,11 @@ resource "aws_iam_role" "databricks_role" {
   tags = var.tags
 }
 
+resource "aws_iam_instance_profile" "databricks_instance_profile" {
+  name = "${var.project_name}-databricks-role"
+  role = aws_iam_role.databricks_role.name
+}
+
 resource "aws_iam_role_policy" "databricks_policy" {
   name = "${var.project_name}-databricks-policy"
   role = aws_iam_role.databricks_role.id
