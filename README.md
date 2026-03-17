@@ -176,7 +176,6 @@ for s in d['states'][:3]:
    - **API scope(s)**: tick các scope: `clusters`, `jobs`, `pipelines`, `dbfs`, `sql`, `files`
      *(hoặc tick `all APIs` nếu là workspace cá nhân)*
 4. Click **Generate** → **copy token ngay** — dạng `dapi_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` (chỉ hiện 1 lần)
-
 5. Lưu vào nơi an toàn
 
 > ℹ️ **External ID không bắt buộc** — project này không yêu cầu. Terraform sẽ tạo IAM role mà không cần External ID.
